@@ -1,0 +1,57 @@
+# === Dependencies ===
+node_modules/
+bun.lockb
+.pnp.*
+.yarn/*
+
+# === Build outputs ===
+dist/
+dist-package/
+build/
+out/
+.next/
+
+# === Tauri / Rust ===
+src-tauri/target/
+src-tauri/gen/schemas/
+src-tauri/WixTools/
+*.exe
+*.dll
+*.app
+*.dmg
+*.deb
+*.rpm
+*.AppImage
+*.msi
+
+# === Logs ===
+*.log
+log/
+logs/
+
+# === IDE / Editor ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# === Environment ===
+.env
+.env.*
+!.env.example
+
+# === OS ===
+.DS_Store
+*.pem
+
+# === Release packages ===
+*.zip
+*.tar.gz
+*.7z
+
+# === Tauri build artifacts ===
+src-tauri/icons/android/
+src-tauri/icons/ios/
