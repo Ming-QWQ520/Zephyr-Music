@@ -1,0 +1,32 @@
+=== Zephyr Music Log ===
+Started: 2026-06-20 22:43:50
+Log file: C:\Users\Administrator\Desktop\Zephyr\log\260620224350.log
+
+[22:43:50.303] [22:43:50.300] INFO [app] Zephyr Music started
+[22:43:50.325] [22:43:50.324] INFO [app] window controls ready
+[22:43:52.682] [22:43:52.673] INFO [addLocal] start
+[22:43:52.683] [22:43:52.673] INFO [localMusic] opening file dialog...
+[22:43:55.134] [22:43:55.123] INFO [localMusic] file selected {"path":"E:\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3"}
+[22:43:55.135] [22:43:55.123] INFO [localMusic] created local song {"id":"local-1781966635123-iu8dir","name":"xxxtentacion-SAD","url":"E:\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3"}
+[22:43:55.136] [22:43:55.124] INFO [addLocal] picked {"name":"xxxtentacion-SAD","url":"E:\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3"}
+[22:43:55.137] [22:43:55.124] INFO [localMusic] localFileUrl {"path":"E:\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3","url":"localfile:///E%3A\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3"}
+[22:43:55.137] [22:43:55.125] INFO [addLocal] convertFileSrc result {"url":"localfile:///E%3A\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3"}
+[22:43:55.140] [22:43:55.126] INFO [addLocal] playNow called {"isPlaying":true,"currentSongUrl":"localfile:///E%3A\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3"}
+[22:43:55.141] [22:43:55.126] INFO [audio] setting src {"url":"localfile:///E%3A\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3","name":"xxxtentacion-SAD","artist":"本地音乐","id":"local-1781966635123-iu8dir"}
+[22:43:55.142] [22:43:55.127] INFO [audio] after load() {"readyState":0,"networkState":3}
+[22:43:55.143] [22:43:55.127] INFO [audio] calling play()...
+[22:43:55.143] [22:43:55.128] INFO [audio] isPlaying=true → audio.play()
+[22:43:55.145] [22:43:55.139] INFO [audio] ▶ play event {"currentTime":0}
+[22:43:55.146] [22:43:55.140] WARN [audio] ⏳ waiting/buffering
+[22:43:55.157] [22:43:55.143] ERROR [audio] ❌ audio error {"code":4,"message":"MEDIA_ELEMENT_ERROR: Format error","src":"localfile:///E%3A\\Music\\Music\\XXXTentacion\\xxxtentacion-SAD.mp3","readyState":0,"networkState":3}
+[22:43:55.158] [22:43:55.144] INFO [audio] isPlaying=false → audio.pause()
+[22:43:55.158] [22:43:55.147] ERROR [audio] play() from watch failed {"error":"NotSupportedError: Failed to load because no supported source was found."}
+[22:43:55.159] [22:43:55.147] ERROR [audio] play() failed {"error":"NotSupportedError: Failed to load because no supported source was found.","name":"NotSupportedError","message":"Failed to load because no supported source was found."}
+[22:43:55.159] [22:43:55.156] INFO [audio] ⏸ pause event {"ended":false}
+[22:43:56.268] [22:43:56.261] INFO [localMusic] API matched {"pic":true,"lrc":true,"name":"SAD!"}
+[22:43:58.232] [22:43:58.215] INFO [audio] isPlaying=true → audio.play()
+[22:43:58.233] [22:43:58.220] ERROR [audio] play() from watch failed {"error":"NotSupportedError: The element has no supported sources."}
+[22:43:58.233] [22:43:58.220] INFO [audio] isPlaying=false → audio.pause()
+[22:44:02.586] [22:44:02.574] INFO [audio] isPlaying=true → audio.play()
+[22:44:02.587] [22:44:02.579] ERROR [audio] play() from watch failed {"error":"NotSupportedError: The element has no supported sources."}
+[22:44:02.587] [22:44:02.580] INFO [audio] isPlaying=false → audio.pause()
