@@ -1,0 +1,9 @@
+# pnpm configuration
+# https://pnpm.io/settings
+
+# Allow these packages to run install scripts (postinstall, etc.)
+# esbuild: needs to download its native binary for Vite to work
+# vue-demi: no build needed
+allowBuilds:
+  esbuild: true
+  vue-demi: false

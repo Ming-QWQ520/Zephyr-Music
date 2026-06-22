@@ -98,37 +98,37 @@ music-player/
 
 ### 环境要求
 - [Node.js](https://nodejs.org/) 18+
-- [Bun](https://bun.sh/) (包管理器)
+- [pnpm](https://pnpm.io/) 9+ (包管理器)
 - [Rust](https://www.rust-lang.org/) (stable)
 - Tauri 2 前置依赖：参见 [Tauri 官方文档](https://tauri.app/start/prerequisites/)
 
 ### 安装依赖
 ```bash
 cd music-player
-bun install
+pnpm install
 ```
 
 ### 开发模式
 ```bash
-bun run tauri dev
+pnpm tauri dev
 ```
 启动 Tauri 开发模式，前端热重载 + Rust 自动重编译。
 
 ### 仅前端开发
 ```bash
-bun run dev
+pnpm dev
 ```
 启动 Vite 开发服务器（浏览器预览，无 Tauri 外壳，本地文件播放不可用）。
 
 ### 构建 Windows 发布版
 ```bash
-bun run tauri build --target x86_64-pc-windows-gnu
+pnpm tauri build --target x86_64-pc-windows-gnu
 ```
 产物在 `src-tauri/target/x86_64-pc-windows-gnu/release/`。
 
 ### 构建 macOS / Linux
 ```bash
-bun run tauri build
+pnpm tauri build
 ```
 
 ---

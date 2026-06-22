@@ -1,8 +1,10 @@
 # === Dependencies ===
 node_modules/
-bun.lockb
 .pnp.*
 .yarn/*
+
+# NOTE: pnpm-lock.yaml SHOULD be committed (it is the lockfile for pnpm).
+# Do NOT ignore it.
 
 # === Build outputs ===
 dist/
