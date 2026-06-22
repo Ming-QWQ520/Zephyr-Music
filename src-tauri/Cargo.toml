@@ -1,6 +1,6 @@
 [package]
 name = "zephyr-music"
-version = "1.0.0"
+version = "1.0.1"
 description = "Zephyr · 现代化本地音乐播放器"
 authors = ["Zephyr"]
 edition = "2021"
@@ -24,6 +24,15 @@ chrono = "0.4"
 urlencoding = "2"
 rodio = "0.19"
 lofty = "0.21"
+
+# This feature is enabled by `tauri build` (production). It tells the tauri
+# crate to embed the frontendDist into the binary (custom protocol) instead of
+# loading from devUrl at runtime. When building with plain `cargo build` for
+# a release, you MUST pass `--features custom-protocol` or the exe will try
+# to load the frontend from http://localhost:1420 at runtime (blank window).
+[features]
+default = []
+custom-protocol = ["tauri/custom-protocol"]
 
 [profile.release]
 panic = "abort"

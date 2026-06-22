@@ -1,7 +1,7 @@
 <script lang="ts">
 import { reactive, watch } from "vue";
 
-export type DisplayMode = "fullscreen" | "compact" | "immersive";
+export type DisplayMode = "both" | "cover" | "lyrics";
 export type ColorMode = "dark" | "light" | "auto";
 export type HAlign = "left" | "center" | "right";
 export type VAlign = "top" | "center" | "bottom";
@@ -9,7 +9,7 @@ export type BgType = "cover" | "blur" | "fluid" | "gradient" | "solid" | "none";
 /** Background audio visualizer style. Replaces the old "karaoke animation". */
 export type VisualizerStyle = "off" | "bars" | "lines" | "wave";
 export type VisualizerColor = "accent" | "white" | "rainbow" | "album";
-export type LyricAlign = "left" | "center" | "right";
+export type LyricAlign = "left" | "center";
 export type AnimationTiming = "smooth" | "swift" | "bouncy" | "soft" | "spring";
 export type FontFamily = "system" | "serif" | "rounded" | "mono" | "song";
 
@@ -26,7 +26,6 @@ export interface PlayerSettings {
   coverHAlign: HAlign;
   coverVAlign: VAlign;
   rectangleCover: boolean;
-  coverClarity: number; // 0..100
   coverShadow: boolean;
 
   // Background
@@ -58,7 +57,6 @@ export interface PlayerSettings {
 
   // Misc
   hidePlayerControls: boolean;
-  centerLyric: boolean;
   autoHideMiniInfo: boolean;
 
   // Experimental
@@ -75,7 +73,7 @@ export interface PlayerSettings {
 const STORAGE_KEY = "rnp-settings";
 
 export const DEFAULT_SETTINGS: PlayerSettings = {
-  displayMode: "fullscreen",
+  displayMode: "both",
   colorMode: "dark",
   accentColor: "#fa233b",
   textShadow: true,
@@ -85,14 +83,13 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   coverHAlign: "left",
   coverVAlign: "center",
   rectangleCover: false,
-  coverClarity: 100,
   coverShadow: true,
 
   bgType: "blur",
-  bgBlur: 80,
-  bgDim: 45,
+  bgBlur: 10,
+  bgDim: 30,
 
-  visualizerStyle: "bars",
+  visualizerStyle: "off",
   visualizerColor: "accent",
   visualizerIntensity: 0.7,
   visualizerOpacity: 0.55,
@@ -113,7 +110,6 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   animationTiming: "smooth",
 
   hidePlayerControls: false,
-  centerLyric: false,
   autoHideMiniInfo: true,
 
   gpuAcceleration: true,
@@ -294,11 +290,11 @@ const APP_VERSION = "1.0.0";
                 <div class="label">显示模式</div>
                 <div class="seg">
                   <button
-                    v-for="m in ['immersive', 'fullscreen', 'compact'] as const"
+                    v-for="m in ['both', 'cover', 'lyrics'] as const"
                     :key="m"
                     :class="{ active: settings.displayMode === m }"
                     @click="settings.displayMode = m"
-                  >{{ m === 'immersive' ? '沉浸' : m === 'fullscreen' ? '全屏' : '紧凑' }}</button>
+                  >{{ m === 'both' ? '都显示' : m === 'cover' ? '只显示封面' : '只显示歌词' }}</button>
                 </div>
               </div>
               <div class="row">
@@ -371,10 +367,6 @@ const APP_VERSION = "1.0.0";
               <div class="row toggle">
                 <div class="label">矩形封面</div>
                 <button class="switch" :class="{ on: settings.rectangleCover }" @click="settings.rectangleCover = !settings.rectangleCover" />
-              </div>
-              <div class="row">
-                <div class="label">清晰度</div>
-                <Slider class="row-slider" :model-value="settings.coverClarity / 100" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.coverClarity = Math.round(v * 100)" />
               </div>
               <div class="row toggle">
                 <div class="label">封面阴影</div>
@@ -495,11 +487,11 @@ const APP_VERSION = "1.0.0";
                 <div class="label">当前行对齐</div>
                 <div class="seg">
                   <button
-                    v-for="m in ['left', 'center', 'right'] as const"
+                    v-for="m in ['left', 'center'] as const"
                     :key="m"
                     :class="{ active: settings.currentLyricAlign === m }"
                     @click="settings.currentLyricAlign = m"
-                  >{{ m === 'left' ? '左' : m === 'center' ? '中' : '右' }}</button>
+                  >{{ m === 'left' ? '左' : '中' }}</button>
                 </div>
               </div>
               <div class="row">
@@ -545,10 +537,6 @@ const APP_VERSION = "1.0.0";
               <div class="row toggle">
                 <div class="label">隐藏播放控件</div>
                 <button class="switch" :class="{ on: settings.hidePlayerControls }" @click="settings.hidePlayerControls = !settings.hidePlayerControls" />
-              </div>
-              <div class="row toggle">
-                <div class="label">歌词居中</div>
-                <button class="switch" :class="{ on: settings.centerLyric }" @click="settings.centerLyric = !settings.centerLyric" />
               </div>
               <div class="row toggle">
                 <div class="label">自动隐藏迷你信息</div>

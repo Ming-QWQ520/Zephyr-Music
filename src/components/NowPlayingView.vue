@@ -439,9 +439,13 @@ function computeAllTransforms(): LineTransform[] {
   const cur = Math.max(0, Math.min(activeIndex.value, lyrics.length - 1));
   // When lyricRotate is on, use left align (semicircle effect)
   const alignPct = settings.lyricRotate ? 50 :
-    settings.currentLyricAlign === "center" ? 50 :
-    settings.currentLyricAlign === "right" ? 65 : 50;
+    settings.currentLyricAlign === "center" ? 50 : 50;
   const containerH = lyricWrapRef.value?.clientHeight || window.innerHeight || 600;
+  // Container width — used to clamp the horizontal `left` offset of rotated
+  // lyric lines so they don't get pushed past the right edge (or pulled past
+  // the left edge) and get clipped by overflow:hidden, which looked like the
+  // lyrics were "occluded by the left cover area" at high curvature.
+  const containerW = lyricWrapRef.value?.clientWidth || window.innerWidth || 800;
 
   let gap = settings.lyricLineGap;
   if (settings.lyricRotate) {
@@ -543,10 +547,19 @@ function computeAllTransforms(): LineTransform[] {
       transforms[i].rotate = Math.min((yOffset / vh) * -curvature, 90);
       const deg = transforms[i].rotate + (Math.atan2(origin[1], origin[0]) * 180) / Math.PI;
       transforms[i].extraTop = Math.sin((deg * Math.PI) / 180) * len - origin[1];
-      transforms[i].left = Math.cos((deg * Math.PI) / 180) * len - origin[0];
+      let leftVal = Math.cos((deg * Math.PI) / 180) * len - origin[0];
+      // Clamp horizontal offset so lyrics don't slide past the container
+      // edges and get clipped (looked like "occluded by left cover area").
+      leftVal = Math.max(-containerW * 0.35, Math.min(containerW * 0.35, leftVal));
+      transforms[i].left = leftVal;
       const rotOp = 1 - Math.pow(Math.abs((yOffset * 2) / vh), 1.15) * 1.2;
       transforms[i].opacity = Math.max(rotOp, 0);
-      if (rotOp <= -1.5) transforms[i].outOfRange = true;
+      // Hide lines whose opacity has decayed to near-zero. Previously the
+      // threshold was rotOp <= -1.5, which left a band of fully-transparent
+      // (but still visible/clickable) lines that obscured other lines at
+      // high curvature. Hiding as soon as rotOp drops to ~0 fixes the
+      // "played/upcoming lyrics are occluded at curvature 50" bug.
+      if (rotOp <= 0.02) transforms[i].outOfRange = true;
     }
   }
 
@@ -577,10 +590,12 @@ function computeAllTransforms(): LineTransform[] {
       transforms[i].rotate = Math.min((yOffset / vh) * -curvature, 90);
       const deg = transforms[i].rotate + (Math.atan2(origin[1], origin[0]) * 180) / Math.PI;
       transforms[i].extraTop = Math.sin((deg * Math.PI) / 180) * len - origin[1];
-      transforms[i].left = Math.cos((deg * Math.PI) / 180) * len - origin[0];
+      let leftVal = Math.cos((deg * Math.PI) / 180) * len - origin[0];
+      leftVal = Math.max(-containerW * 0.35, Math.min(containerW * 0.35, leftVal));
+      transforms[i].left = leftVal;
       const rotOp = 1 - Math.pow(Math.abs((yOffset * 2) / vh), 1.15) * 1.2;
       transforms[i].opacity = Math.max(rotOp, 0);
-      if (rotOp <= -1.5) transforms[i].outOfRange = true;
+      if (rotOp <= 0.02) transforms[i].outOfRange = true;
     }
   }
 
@@ -588,6 +603,11 @@ function computeAllTransforms(): LineTransform[] {
 }
 
 const allTransforms = computed(() => computeAllTransforms());
+
+// ----- Lyric hover state (RNP-style: hovering a line scales it up + brightens) -----
+const hoveredLine = ref(-1);
+function onLyricEnter(idx: number) { hoveredLine.value = idx; }
+function onLyricLeave() { hoveredLine.value = -1; }
 
 const previousActive = ref(-1);
 watch(() => store.activeLyricIndex, (idx) => {
@@ -600,6 +620,7 @@ function lineStyle(idx: number): CSSProperties {
   const t = allTransforms.value[idx];
   if (!t) return {};
   const isActive = idx === activeIndex.value;
+  const isHovered = idx === hoveredLine.value;
   // Uniform font size across active/inactive lines. Visual differentiation
   // between active and inactive is done via the `scale` transform (active=1,
   // inactive≈0.8) plus color/opacity, NOT font size. This keeps measured
@@ -608,26 +629,37 @@ function lineStyle(idx: number): CSSProperties {
   const fontSize = settings.lyricFontSize * settings.fontScale;
   const fontWeight = isActive ? (settings.boldFirstLine && idx === 0 ? 800 : 700) : 500;
   // When lyricRotate is on, force left align so line starts form a semicircle
-  const align: "left" | "center" | "right" =
+  const align: "left" | "center" =
     settings.lyricRotate ? "left" :
-    settings.currentLyricAlign === "center" ? "center" :
-    settings.currentLyricAlign === "right" ? "right" : "left";
+    settings.currentLyricAlign === "center" ? "center" : "left";
   const interlude = parsedLyrics.value[idx]?.isInterlude;
+
+  // RNP-style hover: scale up the hovered line slightly (unless it's the
+  // active line, which is already at scale=1 and shouldn't be displaced).
+  // Reduced from 1.12 to 1.05 — large hover scales caused long lyric lines
+  // to overflow past the right edge of the screen.
+  const hoverScale = isHovered && !isActive ? 1.05 : 1;
+  const finalScale = t.scale * hoverScale;
 
   // Transform: RNP order = translateX(left) translateY(top+extraTop) scale rotate
   const parts: string[] = [];
   if (t.left) parts.push(`translateX(${t.left}px)`);
   parts.push(`translateY(${t.top + t.extraTop}px)`);
-  parts.push(`scale(${t.scale})`);
+  parts.push(`scale(${finalScale})`);
   if (t.rotate) parts.push(`rotate(${t.rotate}deg)`);
   const transform = parts.join(" ");
+
+  // Hover brightens the line (raise opacity toward 1)
+  const finalOpacity = isHovered ? Math.min(1, t.opacity + 0.35) : t.opacity;
+  // Hover reduces blur so the hovered line is sharper
+  const finalBlur = isHovered ? Math.max(0, t.blur - 2) : t.blur;
 
   const height = interlude ? "0" : "auto";
 
   const style: CSSProperties = {
     transform,
-    opacity: t.opacity,
-    filter: t.blur > 0 ? `blur(${t.blur}px)` : "none",
+    opacity: finalOpacity,
+    filter: finalBlur > 0 ? `blur(${finalBlur}px)` : "none",
     fontSize: `${fontSize}px`,
     fontWeight,
     textAlign: align,
@@ -769,17 +801,22 @@ const queueList = computed(() => store.queue);
       </div>
     </div>
 
-    <!-- Topbar -->
-    <header class="topbar" :class="{ visible: topbarVisible || showSettings || showQueue }">
-      <button class="icon-btn tauri-no-drag" title="收起到迷你播放器" @click="close">
-        <Icon name="chevronDown" :size="20" />
-      </button>
+    <!-- Topbar: center song info is ALWAYS visible; only side icons fade in/out -->
+    <header class="topbar">
+      <!-- Left icons (collapse, etc.) — hide when mouse leaves topbar -->
+      <div class="topbar-side topbar-left" :class="{ visible: topbarVisible || showSettings || showQueue }">
+        <button class="icon-btn tauri-no-drag" title="收起到迷你播放器" @click="close">
+          <Icon name="chevronDown" :size="20" />
+        </button>
+      </div>
+      <!-- Center song info — always visible -->
       <div class="topbar-title truncate">
         {{ song?.name || "未在播放" }}
         <span v-if="song" class="sep">—</span>
         <span v-if="song" class="artist truncate">{{ song.artist }}</span>
       </div>
-      <div class="topbar-actions">
+      <!-- Right icons (fullscreen, settings) — hide when mouse leaves topbar -->
+      <div class="topbar-side topbar-right" :class="{ visible: topbarVisible || showSettings || showQueue }">
         <button class="icon-btn" title="全屏" @click="toggleFullscreen">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
         </button>
@@ -792,7 +829,11 @@ const queueList = computed(() => store.queue);
     <!-- Main content: cover (left) + lyrics (right) -->
     <main class="np-main">
       <!-- Left: cover + info + controls -->
-      <section class="left-pane" :class="[`halign-${settings.coverHAlign}`, `valign-${settings.coverVAlign}`]">
+      <section class="left-pane" :class="[
+        `halign-${settings.hidePlayerControls ? 'center' : settings.coverHAlign}`,
+        `valign-${settings.coverVAlign}`,
+        { 'hide-controls': settings.hidePlayerControls }
+      ]">
         <div class="cover-wrap" :class="{ rectangle: settings.rectangleCover }">
           <div class="cover-shadow" v-if="settings.coverShadow" />
           <div class="cover">
@@ -808,13 +849,13 @@ const queueList = computed(() => store.queue);
           </div>
         </div>
 
-        <div class="song-meta" :class="{ hidden: settings.autoHideMiniInfo && !topbarVisible }">
+        <div class="song-meta">
           <div class="title truncate">{{ song?.name || "—" }}</div>
           <div class="artist truncate">{{ song?.artist || "—" }}</div>
         </div>
 
-        <!-- Controls -->
-        <div class="controls-block" :class="{ hidden: settings.hidePlayerControls && !topbarVisible }">
+        <!-- Controls (fully hidden when hidePlayerControls is on) -->
+        <div class="controls-block" :class="{ hidden: settings.hidePlayerControls }">
           <div class="progress-row">
             <span class="time">{{ formatTime(store.currentTime) }}</span>
             <Slider
@@ -871,7 +912,7 @@ const queueList = computed(() => store.queue);
       </section>
 
       <!-- Right: lyrics -->
-      <section class="right-pane" :class="{ 'center-lyric': settings.centerLyric }">
+      <section class="right-pane" :class="`lyric-align-${settings.lyricRotate ? 'left' : settings.currentLyricAlign}`">
         <div v-if="!parsedLyrics.length" class="no-lyrics">
           <Icon name="lyrics" :size="42" />
           <p>暂无歌词</p>
@@ -892,9 +933,12 @@ const queueList = computed(() => store.queue);
                 passed: idx < activeIndex,
                 interlude: line.isInterlude,
                 'has-translation': !!line.translation && settings.showTranslation,
+                hovered: idx === hoveredLine,
               }"
               :style="lineStyle(idx)"
               @click="seekToLyric(idx)"
+              @mouseenter="onLyricEnter(idx)"
+              @mouseleave="onLyricLeave()"
             >
               <span class="lyric-text" :class="{ 'text-shadow': settings.textShadow, 'text-glow': settings.textGlow }">
                 {{ line.text }}
@@ -1021,22 +1065,31 @@ const queueList = computed(() => store.queue);
 .rnp-bg-dim { background: #000; }
 .rnp-bg-blur-overlay { pointer-events: none; }
 
-/* ----- Audio visualizer canvas (bottom flex item, not absolute) ----- */
+/* ----- Audio visualizer canvas (absolute overlay at bottom — doesn't affect layout) -----
+   The visualizer overlays the bottom of the screen. It does NOT take flex
+   space, so the cover/lyrics stay vertically centered in the full viewport.
+   The lyrics' own mask (fade top/bottom) keeps them readable above the
+   visualizer strip. */
 .viz-canvas {
-  position: relative;
-  z-index: 2;
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
   width: 100%;
   height: 26vh;
-  flex-shrink: 0; /* don't let flex squeeze the visualizer */
+  z-index: 1;
   pointer-events: none;
-  /* The canvas draws with its own opacity baked in (per-bar gradients);
-     mix-blend-mode screen harmonizes it with album-art backgrounds.
+  /* No mix-blend-mode: it made opacity changes invisible (screen blend
+     clamps dark colors to the background, so lowering alpha had no visible
+     effect). Normal alpha blending lets the opacity slider work as expected.
      GPU acceleration (translateZ/will-change) is toggled globally in
      style.css via html.gpu-accel / html.no-gpu. */
-  mix-blend-mode: screen;
 }
 
-/* ----- Topbar ----- */
+/* ----- Topbar -----
+   The topbar itself is always visible. The center song title is always shown.
+   Only the side icon groups (left: collapse; right: fullscreen/settings)
+   fade in when the user moves the mouse to the top of the screen. */
 .topbar {
   position: relative;
   z-index: 10;
@@ -1045,23 +1098,31 @@ const queueList = computed(() => store.queue);
   gap: 12px;
   height: var(--titlebar-h);
   padding: 0 16px;
-  opacity: 0;
-  transition: opacity 0.25s var(--ease-out);
 }
-.topbar.visible { opacity: 1; }
 .topbar-title {
   flex: 1;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-secondary);
   text-align: center;
+  /* Always visible — the song info in the center is the persistent identity
+     of the Now Playing screen. */
 }
 .topbar-title .sep { margin: 0 6px; opacity: 0.4; }
 .topbar-title .artist { color: var(--text-tertiary); }
-.topbar-actions {
+/* Side icon groups: fade out when mouse leaves the top strip. They take up
+   fixed width so the center title stays centered whether they're visible
+   or not. */
+.topbar-side {
   display: flex;
   gap: 4px;
+  min-width: 44px;
+  opacity: 0;
+  transition: opacity 0.25s var(--ease-out);
 }
+.topbar-side.visible { opacity: 1; }
+.topbar-left { justify-content: flex-start; }
+.topbar-right { justify-content: flex-end; }
 .topbar .icon-btn {
   color: rgba(255, 255, 255, 0.7);
 }
@@ -1081,14 +1142,34 @@ const queueList = computed(() => store.queue);
   padding: 0 clamp(24px, 4vw, 56px) clamp(20px, 3vh, 40px);
   min-height: 0;
 }
-.mode-compact .np-main {
+/* mode-both: show both cover (left) and lyrics (right) — the default
+   two-column layout. No overrides needed since .np-main's default
+   grid-template-columns already handles this. */
+.mode-both .np-main {
+  grid-template-columns: minmax(320px, 45%) 1fr;
+}
+
+/* mode-cover: only show the cover (centered), hide lyrics pane */
+.mode-cover .np-main {
   grid-template-columns: 1fr;
   text-align: center;
+  justify-items: center;
 }
-.mode-compact .right-pane { display: none; }
+.mode-cover .right-pane { display: none; }
+.mode-cover .left-pane { align-items: center; }
+
+/* mode-lyrics: only show lyrics, hide cover + controls */
+.mode-lyrics .np-main {
+  grid-template-columns: 1fr;
+}
+.mode-lyrics .left-pane { display: none; }
+.mode-lyrics .right-pane { display: flex; }
 
 /* ----- Left pane (cover + controls) ----- */
 .left-pane {
+  position: relative;
+  z-index: 1; /* below right-pane (lyrics, z-index:5) so rotated lyrics
+                  are never occluded by the cover */
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1145,7 +1226,6 @@ const queueList = computed(() => store.queue);
   width: min(340px, 28vw);
   transition: opacity 0.3s var(--ease-out);
 }
-.song-meta.hidden { opacity: 0; pointer-events: none; }
 .song-meta .title {
   font-size: 24px;
   font-weight: 700;
@@ -1163,9 +1243,21 @@ const queueList = computed(() => store.queue);
   display: flex;
   flex-direction: column;
   gap: 12px;
-  transition: opacity 0.3s var(--ease-out);
+  transition: opacity 0.3s var(--ease-out), max-height 0.3s var(--ease-out), margin 0.3s var(--ease-out);
+  max-height: 320px;
+  overflow: hidden;
 }
-.controls-block.hidden { opacity: 0; pointer-events: none; }
+/* When hidePlayerControls is on, ALL playback controls (progress bar, play/
+ * prev/next/shuffle buttons, volume slider) collapse to zero height and
+ * disappear entirely. Only the cover and song info remain, and the cover
+ * becomes horizontally centered (via the halign-center class applied to
+ * .left-pane when hidePlayerControls is active). */
+.controls-block.hidden {
+  opacity: 0;
+  pointer-events: none;
+  max-height: 0;
+  margin-top: -20px; /* negate the left-pane gap so cover stays centered */
+}
 .progress-row {
   display: flex;
   align-items: center;
@@ -1230,15 +1322,20 @@ const queueList = computed(() => store.queue);
 .vol-row .volume { flex: 1; }
 
 /* ----- Right pane (lyrics) ----- */
+/* The lyrics pane sits ABOVE the left (cover) pane so that rotated lyric
+   lines never get occluded by the cover art or its shadow. z-index here is
+   relative to the .np-main stacking context (both panes are children of
+   .np-main which has z-index:2). */
 .right-pane {
   position: relative;
+  z-index: 5; /* above left-pane (auto/default) within .np-main */
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
-.right-pane.center-lyric .lyric-wrap {
-  text-align: center;
-}
+.right-pane.lyric-align-center .lyric-wrap { text-align: center; }
+.right-pane.lyric-align-right .lyric-wrap { text-align: right; }
+.right-pane.lyric-align-left .lyric-wrap { text-align: left; }
 .no-lyrics {
   flex: 1;
   display: flex;
@@ -1250,7 +1347,11 @@ const queueList = computed(() => store.queue);
 }
 .lyric-wrap {
   flex: 1;
-  overflow: hidden;
+  /* overflow: visible so rotated lyric lines can extend over the left (cover)
+     pane without being clipped. The right-pane has z-index:5 so lyrics
+     render on top of the cover. The mask-image still fades the top/bottom
+     edges for a smooth visual. */
+  overflow: visible;
   position: relative;
   mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
   -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
@@ -1271,10 +1372,11 @@ const queueList = computed(() => store.queue);
   left: 0;
   right: 0;
   transform-origin: left center;
-  transition: transform var(--timing), opacity var(--timing), filter var(--timing);
+  transition: transform var(--timing), opacity var(--timing), filter var(--timing), color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
   cursor: pointer;
   pointer-events: auto;
   padding: 6px 16px;
+  border-radius: 10px;
   white-space: normal;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -1283,19 +1385,33 @@ const queueList = computed(() => store.queue);
   align-items: flex-start;
   gap: 4px;
 }
-.right-pane.center-lyric .lyric-line { align-items: center; }
+.right-pane.lyric-align-center .lyric-line { align-items: center; }
+.right-pane.lyric-align-right .lyric-line { align-items: flex-end; }
+.right-pane.lyric-align-left .lyric-line { align-items: flex-start; }
 .lyric-line.active {
   color: #fff;
 }
 .lyric-line.passed { color: rgba(255, 255, 255, 0.42); }
 .lyric-line:not(.active) { color: rgba(255, 255, 255, 0.55); }
+/* RNP-style hover: brighten the hovered (non-active) line toward white,
+   add a soft rounded border (via box-shadow so it doesn't shift layout)
+   and a subtle translucent background. This matches the RNP look where
+   hovering a lyric line shows a clear bordered highlight. */
+.lyric-line.hovered:not(.active) {
+  color: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 0 18px rgba(255, 255, 255, 0.12);
+}
 .lyric-line.interlude {
   pointer-events: none;
 }
 .lyric-text {
-  display: inline-block;
+  display: block;
   line-height: 1.35;
   font-weight: inherit;
+  text-align: inherit;
 }
 .lyric-text.text-shadow { text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
 .lyric-text.text-glow {
@@ -1305,16 +1421,23 @@ const queueList = computed(() => store.queue);
   text-shadow: 0 0 24px var(--accent), 0 0 8px rgba(255, 255, 255, 0.6);
 }
 .lyric-translation {
+  display: block;
   font-size: 0.62em;
   color: rgba(255, 255, 255, 0.6);
   font-weight: 400;
   line-height: 1.35;
+  /* Inherit text alignment from the .lyric-line's text-align (set by
+     lyric-align-left/center/right). This ensures translations line up
+     under the main lyric text. */
+  text-align: inherit;
 }
 .lyric-romaji {
+  display: block;
   font-size: 0.55em;
   color: rgba(255, 255, 255, 0.4);
   font-style: italic;
   font-weight: 400;
+  text-align: inherit;
 }
 
 /* ----- Queue panel ----- */
@@ -1400,7 +1523,14 @@ const queueList = computed(() => store.queue);
     padding: 0 16px 24px;
     gap: 16px;
   }
-  .right-pane { display: none; }
+  /* On narrow screens, force cover mode (hide lyrics) unless the user
+     explicitly chose lyrics-only mode. */
+  .mode-both .right-pane { display: none; }
+  .mode-both .left-pane { align-items: center; }
+  .mode-lyrics .np-main { grid-template-columns: 1fr; }
+  .mode-lyrics .right-pane { display: flex; }
+  .mode-lyrics .left-pane { display: none; }
+  .mode-cover .right-pane { display: none; }
   .left-pane { align-items: center; }
   .cover-wrap { width: min(260px, 60vw); }
   .controls-block { width: 100%; max-width: 480px; }

@@ -258,13 +258,15 @@ onMounted(() => {
 .np-fade-leave-active {
   transition: opacity 0.32s var(--ease-out), transform 0.32s var(--ease-out);
 }
+/* Enter: slide down from top (from -100% to 0) */
 .np-fade-enter-from {
   opacity: 0;
-  transform: scale(1.04);
+  transform: translateY(-100%);
 }
+/* Leave: slide down to bottom (from 0 to 100%) — "从上往下移动收起" */
 .np-fade-leave-to {
   opacity: 0;
-  transform: scale(0.98);
+  transform: translateY(100%);
 }
 
 @media (max-width: 720px) {
