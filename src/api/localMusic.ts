@@ -23,20 +23,18 @@ interface LocalMeta {
 
 /**
  * Try to look up cover art + lyrics for a local file by querying the
- * online search API with the file name. Returns whatever it can find.
+ * online search API with the file name. Always uses the first result
+ * (most relevant) — no heuristic matching needed.
  */
 async function fetchLocalMeta(fileName: string): Promise<LocalMeta> {
   const base = stripExt(fileName).trim();
   if (!base) return {};
   try {
-    const results = await searchSongs(base, 5);
+    const results = await searchSongs(base, 1);
     if (!results.length) return {};
-    // Heuristic: pick the first result whose name appears in the file name,
-    // otherwise just the first one.
-    const lower = base.toLowerCase();
-    const pick =
-      results.find((r) => lower.includes(r.name.toLowerCase())) || results[0];
-    return { coverUrl: pick.pic || undefined, lrcUrl: pick.lrc || undefined };
+    // Always use the first result (API returns most relevant first)
+    const first = results[0];
+    return { coverUrl: first.pic || undefined, lrcUrl: first.lrc || undefined };
   } catch (e) {
     log.warn("localMusic", "meta lookup failed", { error: String(e) });
     return {};

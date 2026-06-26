@@ -6,6 +6,7 @@ import { log } from "@/composables/logger";
 import Sidebar from "@/components/Sidebar.vue";
 import GlobalSearchBar from "@/components/GlobalSearchBar.vue";
 import SearchView from "@/components/SearchView.vue";
+import NeteaseView from "@/components/NeteaseView.vue";
 import QueueView from "@/components/QueueView.vue";
 import LibraryView from "@/components/LibraryView.vue";
 import PlayerBar from "@/components/PlayerBar.vue";
@@ -86,24 +87,24 @@ onMounted(() => {
         </div>
       </div>
 
-      <div class="tb-center tauri-no-drag">
+      <div class="tb-center">
         <GlobalSearchBar />
       </div>
 
-      <div class="tb-right tauri-no-drag">
+      <div class="tb-right">
         <button
-          class="icon-btn"
+          class="icon-btn tauri-no-drag"
           :class="{ active: showNowPlaying }"
           title="全屏播放器"
           @click="toggleNowPlaying"
         >
           <Icon name="expand" :size="16" />
         </button>
-        <button class="icon-btn" title="设置" @click="showSettings = true">
+        <button class="icon-btn tauri-no-drag" title="设置" @click="showSettings = true">
           <Icon name="settings" :size="16" />
         </button>
         <!-- Window controls: minimize, maximize, close (rightmost) -->
-        <div class="win-ctrls">
+        <div class="win-ctrls tauri-no-drag">
           <button class="win-btn" title="最小化" @click="minimizeWindow">
             <Icon name="minimize" :size="14" />
           </button>
@@ -123,6 +124,7 @@ onMounted(() => {
 
       <main class="main-view">
         <SearchView v-if="store.currentView === 'search'" />
+        <NeteaseView v-else-if="store.currentView === 'netease'" />
         <QueueView v-else-if="store.currentView === 'queue'" />
         <LibraryView v-else-if="store.currentView === 'library'" />
         <div v-else class="placeholder-view">

@@ -802,7 +802,7 @@ const queueList = computed(() => store.queue);
     </div>
 
     <!-- Topbar: center song info is ALWAYS visible; only side icons fade in/out -->
-    <header class="topbar">
+    <header class="topbar tauri-drag">
       <!-- Left icons (collapse, etc.) — hide when mouse leaves topbar -->
       <div class="topbar-side topbar-left" :class="{ visible: topbarVisible || showSettings || showQueue }">
         <button class="icon-btn tauri-no-drag" title="收起到迷你播放器" @click="close">
@@ -816,7 +816,7 @@ const queueList = computed(() => store.queue);
         <span v-if="song" class="artist truncate">{{ song.artist }}</span>
       </div>
       <!-- Right icons (fullscreen, settings) — hide when mouse leaves topbar -->
-      <div class="topbar-side topbar-right" :class="{ visible: topbarVisible || showSettings || showQueue }">
+      <div class="topbar-side topbar-right tauri-no-drag" :class="{ visible: topbarVisible || showSettings || showQueue }">
         <button class="icon-btn" title="全屏" @click="toggleFullscreen">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
         </button>
