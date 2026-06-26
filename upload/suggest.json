@@ -1,0 +1,357 @@
+{
+  "result": {
+    "albums": [
+      {
+        "id": 177709425,
+        "name": "碎碎念",
+        "artist": {
+          "id": 1143033,
+          "name": "队长",
+          "picUrl": "https://p2.music.126.net/bFUIuxjaooW5dH98_NaAoA==/109951170827419881.jpg",
+          "alias": [
+            "杨浪，youngcaptain"
+          ],
+          "albumSize": 51,
+          "musicSize": 151,
+          "picId": 109951170827419890,
+          "fansGroup": null,
+          "recommendText": null,
+          "appendRecText": null,
+          "fansSize": null,
+          "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+          "img1v1": 0,
+          "alia": [
+            "杨浪，youngcaptain"
+          ],
+          "trans": null
+        },
+        "publishTime": 1699977600000,
+        "size": 5,
+        "copyrightId": 7001,
+        "status": 1,
+        "picId": 109951169256300960,
+        "mark": 0
+      },
+      {
+        "id": 145464894,
+        "name": "碎碎念",
+        "artist": {
+          "id": 51957057,
+          "name": "ljz329",
+          "picUrl": "https://p2.music.126.net/qxQ2Rw_3WTAEJxVCRSQetg==/109951167186510288.jpg",
+          "alias": [],
+          "albumSize": 15,
+          "musicSize": 32,
+          "picId": 109951167186510290,
+          "fansGroup": null,
+          "recommendText": null,
+          "appendRecText": null,
+          "fansSize": null,
+          "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+          "img1v1": 0,
+          "trans": null
+        },
+        "publishTime": 1653408000000,
+        "size": 1,
+        "copyrightId": 0,
+        "status": 1,
+        "picId": 109951167471178580,
+        "mark": 0
+      }
+    ],
+    "artists": [
+      {
+        "id": 100022886,
+        "name": "碎碎念",
+        "picUrl": "https://p2.music.126.net/nyUMgPQuMcj3RHP97PnCLg==/109951172012676565.jpg",
+        "alias": [],
+        "albumSize": 4,
+        "musicSize": 4,
+        "picId": 109951172012676560,
+        "fansGroup": null,
+        "recommendText": null,
+        "appendRecText": null,
+        "fansSize": null,
+        "img1v1Url": "https://p2.music.126.net/TpRwvFN0uqS5NVPOQAxsbQ==/109951173432831702.jpg",
+        "accountId": 1766844485,
+        "img1v1": 109951173432831700,
+        "trans": null
+      }
+    ],
+    "songs": [
+      {
+        "id": 2097443876,
+        "name": "碎碎念",
+        "artists": [
+          {
+            "id": 1143033,
+            "name": "队长",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          }
+        ],
+        "album": {
+          "id": 177709425,
+          "name": "碎碎念",
+          "artist": {
+            "id": 0,
+            "name": "",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          },
+          "publishTime": 1699977600000,
+          "size": 5,
+          "copyrightId": 7001,
+          "status": 1,
+          "picId": 109951169256300960,
+          "mark": 0
+        },
+        "duration": 132748,
+        "copyrightId": 7001,
+        "status": 0,
+        "alias": [],
+        "rtype": 0,
+        "ftype": 0,
+        "mvid": 0,
+        "fee": 1,
+        "rUrl": null,
+        "mark": 17179877376
+      },
+      {
+        "id": 1950306317,
+        "name": "碎碎念",
+        "artists": [
+          {
+            "id": 12570417,
+            "name": "那奇沃夫",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          },
+          {
+            "id": 51957057,
+            "name": "ljz329",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          }
+        ],
+        "album": {
+          "id": 145464894,
+          "name": "碎碎念",
+          "artist": {
+            "id": 0,
+            "name": "",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          },
+          "publishTime": 1653408000000,
+          "size": 1,
+          "copyrightId": 0,
+          "status": 1,
+          "picId": 109951167471178580,
+          "mark": 0
+        },
+        "duration": 194241,
+        "copyrightId": 0,
+        "status": 0,
+        "alias": [],
+        "rtype": 0,
+        "ftype": 0,
+        "mvid": 0,
+        "fee": 8,
+        "rUrl": null,
+        "mark": 17179877376
+      },
+      {
+        "id": 2715208441,
+        "name": "碎碎念",
+        "artists": [
+          {
+            "id": 98840369,
+            "name": "吻云",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          },
+          {
+            "id": 37198739,
+            "name": "李幼白",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          }
+        ],
+        "album": {
+          "id": 275085787,
+          "name": "碎碎念",
+          "artist": {
+            "id": 0,
+            "name": "",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          },
+          "publishTime": 1749830400000,
+          "size": 1,
+          "copyrightId": -1,
+          "status": 1,
+          "picId": 109951171302104030,
+          "mark": 0
+        },
+        "duration": 140000,
+        "copyrightId": 0,
+        "status": 0,
+        "alias": [],
+        "rtype": 0,
+        "ftype": 0,
+        "transNames": [
+          "她难过时爱碎碎念"
+        ],
+        "mvid": 0,
+        "fee": 8,
+        "rUrl": null,
+        "mark": 536879104
+      },
+      {
+        "id": 1937443257,
+        "name": "碎碎念",
+        "artists": [
+          {
+            "id": 47836659,
+            "name": "王谦",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          }
+        ],
+        "album": {
+          "id": 143371166,
+          "name": "碎碎念",
+          "artist": {
+            "id": 0,
+            "name": "",
+            "picUrl": null,
+            "alias": [],
+            "albumSize": 0,
+            "musicSize": 0,
+            "picId": 0,
+            "fansGroup": null,
+            "recommendText": null,
+            "appendRecText": null,
+            "fansSize": null,
+            "img1v1Url": "https://p2.music.126.net/6y-UleORITEDbvrOLV0Q8A==/5639395138885805.jpg",
+            "img1v1": 0,
+            "trans": null
+          },
+          "publishTime": 1650446754205,
+          "size": 1,
+          "copyrightId": 0,
+          "status": 0,
+          "picId": 109951167282407440,
+          "mark": 0
+        },
+        "duration": 170000,
+        "copyrightId": 0,
+        "status": 0,
+        "alias": [],
+        "rtype": 0,
+        "ftype": 0,
+        "mvid": 0,
+        "fee": 8,
+        "rUrl": null,
+        "mark": 17179877440
+      }
+    ],
+    "order": [
+      "songs",
+      "artists",
+      "albums"
+    ]
+  },
+  "code": 200
+}
