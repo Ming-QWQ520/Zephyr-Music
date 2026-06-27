@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { useAudioBinding } from "@/composables/useAudioBinding";
 import { log } from "@/composables/logger";
@@ -13,6 +13,7 @@ import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import Icon from "@/components/Icon.vue";
+import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser } from "@/api/netease";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
@@ -20,10 +21,62 @@ const { settings } = useSettings();
 const audioRef = ref<HTMLAudioElement | null>(null);
 useAudioBinding(audioRef);
 
-const sidebarCollapsed = ref(false);
 const showSettings = ref(false);
-
 const showNowPlaying = computed(() => store.currentView === "nowplaying");
+
+// ===== 网易云登录状态（标题栏显示）=====
+const neLoggedIn = ref(false);
+const neUser = ref<{ nickname: string; avatarUrl: string } | null>(null);
+const showLoginDropdown = ref(false);
+const qrCodeImg = ref("");
+const qrStatus = ref<"idle" | "loading" | "waiting" | "expired">("idle");
+const qrMessage = ref("");
+let qrCheckTimer: ReturnType<typeof setInterval> | null = null;
+let qrKeyVal = "";
+
+async function checkNeLogin() {
+  if (!getCookie()) return;
+  const user = await getCachedUser();
+  if (user) {
+    neLoggedIn.value = true;
+    neUser.value = { nickname: user.nickname, avatarUrl: user.avatarUrl };
+  }
+}
+
+async function startNeLogin() {
+  qrStatus.value = "loading"; qrMessage.value = "正在生成二维码..."; qrCodeImg.value = "";
+  try {
+    const keyRes = await qrKey();
+    if (!keyRes.unikey) { qrMessage.value = "生成失败"; qrStatus.value = "idle"; return; }
+    qrKeyVal = keyRes.unikey;
+    const createRes = await qrCreate(qrKeyVal);
+    if (!createRes.qrimg) { qrMessage.value = "生成失败"; qrStatus.value = "idle"; return; }
+    qrCodeImg.value = createRes.qrimg;
+    qrStatus.value = "waiting"; qrMessage.value = "请用网易云音乐 App 扫码";
+    stopNeQrCheck();
+    qrCheckTimer = setInterval(async () => {
+      try {
+        const res = await qrCheck(qrKeyVal);
+        if (res.code === 800) { qrStatus.value = "expired"; qrMessage.value = "二维码已过期"; stopNeQrCheck(); }
+        else if (res.code === 802) { qrMessage.value = "已扫码，请确认"; }
+        else if (res.code === 803) {
+          if (res.cookie) setCookie(res.cookie);
+          stopNeQrCheck();
+          await checkNeLogin();
+          showLoginDropdown.value = false;
+        }
+      } catch { /* ignore */ }
+    }, 2000);
+  } catch (e) { qrMessage.value = "出错: " + String(e); qrStatus.value = "idle"; }
+}
+function stopNeQrCheck() { if (qrCheckTimer) { clearInterval(qrCheckTimer); qrCheckTimer = null; } }
+
+async function doNeLogout() {
+  try { await logout(); } catch { /* ignore */ }
+  neLoggedIn.value = false; neUser.value = null;
+  showLoginDropdown.value = false;
+  qrStatus.value = "idle"; qrCodeImg.value = "";
+}
 
 async function minimizeWindow() {
   try {
@@ -63,6 +116,16 @@ function toggleNowPlaying() {
 onMounted(() => {
   log.init();
   log.info("app", "booted");
+  checkNeLogin();
+  // 定期保存会话（每 10 秒）
+  sessionTimer = setInterval(() => store.saveSession(), 10000);
+  // 页面关闭前保存
+  window.addEventListener("beforeunload", () => store.saveSession());
+});
+let sessionTimer: ReturnType<typeof setInterval> | null = null;
+onUnmounted(() => {
+  if (sessionTimer) clearInterval(sessionTimer);
+  store.saveSession();
 });
 </script>
 
@@ -74,53 +137,75 @@ onMounted(() => {
     <!-- Titlebar -->
     <header class="titlebar tauri-drag">
       <div class="tb-left">
-        <button
-          class="icon-btn tauri-no-drag"
-          :title="sidebarCollapsed ? '展开侧栏' : '折叠侧栏'"
-          @click="sidebarCollapsed = !sidebarCollapsed"
-        >
-          <Icon name="collapse" :size="16" />
-        </button>
         <div class="brand">
           <img src="/favicon.svg" alt="Zephyr" class="brand-icon" />
           <span class="brand-name">Zephyr</span>
         </div>
       </div>
 
-      <div class="tb-center">
+      <!-- 搜索框（左移 5px）-->
+      <div class="tb-center" style="margin-left: -5px;">
         <GlobalSearchBar />
       </div>
 
       <div class="tb-right">
-        <button
-          class="icon-btn tauri-no-drag"
-          :class="{ active: showNowPlaying }"
-          title="全屏播放器"
-          @click="toggleNowPlaying"
-        >
+        <!-- 网易云登录/头像 -->
+        <div class="ne-auth tauri-no-drag">
+          <button v-if="!neLoggedIn" class="ne-login-btn" @click="showLoginDropdown = !showLoginDropdown">
+            <Icon name="music" :size="14" />
+            <span>登录</span>
+          </button>
+          <button v-else class="ne-user-btn" @click="showLoginDropdown = !showLoginDropdown">
+            <img v-if="neUser?.avatarUrl" :src="neUser.avatarUrl" class="ne-avatar" referrerpolicy="no-referrer" />
+            <span class="ne-name truncate">{{ neUser?.nickname }}</span>
+          </button>
+
+          <!-- 登录下拉 -->
+          <Transition name="dropdown">
+            <div v-if="showLoginDropdown" class="ne-dropdown" @click.stop>
+              <!-- 未登录：二维码 -->
+              <template v-if="!neLoggedIn">
+                <div v-if="qrStatus === 'idle'" class="qr-start">
+                  <button class="qr-gen-btn" @click="startNeLogin">生成二维码登录</button>
+                </div>
+                <div v-else-if="qrStatus === 'loading'" class="qr-loading">
+                  <div class="spinner" /><span>正在生成...</span>
+                </div>
+                <div v-else class="qr-show">
+                  <img v-if="qrCodeImg" :src="qrCodeImg" alt="二维码" class="qr-img" />
+                  <div v-if="qrStatus === 'expired'" class="qr-expired" @click="startNeLogin">点击刷新</div>
+                </div>
+                <p class="qr-msg">{{ qrMessage }}</p>
+              </template>
+              <!-- 已登录：退出 -->
+              <template v-else>
+                <div class="ne-logged-info">
+                  <img v-if="neUser?.avatarUrl" :src="neUser.avatarUrl" class="ne-avatar-lg" referrerpolicy="no-referrer" />
+                  <span>{{ neUser?.nickname }}</span>
+                </div>
+                <button class="ne-logout-btn" @click="doNeLogout">退出登录</button>
+              </template>
+            </div>
+          </Transition>
+        </div>
+
+        <button class="icon-btn tauri-no-drag" :class="{ active: showNowPlaying }" title="全屏播放器" @click="toggleNowPlaying">
           <Icon name="expand" :size="16" />
         </button>
         <button class="icon-btn tauri-no-drag" title="设置" @click="showSettings = true">
-          <Icon name="settings" :size="16" />
+          <img src="/icons/settings.svg" alt="settings" class="settings-icon" />
         </button>
-        <!-- Window controls: minimize, maximize, close (rightmost) -->
         <div class="win-ctrls tauri-no-drag">
-          <button class="win-btn" title="最小化" @click="minimizeWindow">
-            <Icon name="minimize" :size="14" />
-          </button>
-          <button class="win-btn" title="最大化" @click="toggleMaximize">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/></svg>
-          </button>
-          <button class="win-btn win-close" title="关闭" @click="closeWindow">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          </button>
+          <button class="win-btn" title="最小化" @click="minimizeWindow"><Icon name="minimize" :size="14" /></button>
+          <button class="win-btn" title="最大化" @click="toggleMaximize"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/></svg></button>
+          <button class="win-btn win-close" title="关闭" @click="closeWindow"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
         </div>
       </div>
     </header>
 
     <!-- Body: sidebar + main view + playerbar -->
     <div class="app-body">
-      <Sidebar v-model:collapsed="sidebarCollapsed" />
+      <Sidebar />
 
       <main class="main-view">
         <SearchView v-if="store.currentView === 'search'" />
@@ -205,6 +290,44 @@ onMounted(() => {
   gap: 4px;
 }
 .tb-right .icon-btn { width: 28px; height: 28px; }
+.settings-icon { width: 16px; height: 16px; display: inline-block; pointer-events: none; }
+
+/* 网易云登录 */
+.ne-auth { position: relative; margin-right: 4px; }
+.ne-login-btn, .ne-user-btn {
+  display: flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px; border-radius: 14px;
+  font-size: 12px; color: var(--text-secondary); transition: all 0.15s;
+}
+.ne-login-btn { background: var(--bg-elev-3); }
+.ne-login-btn:hover { color: var(--accent); }
+.ne-user-btn { background: var(--bg-elev-3); max-width: 120px; }
+.ne-user-btn:hover { background: var(--bg-hover); }
+.ne-avatar { width: 20px; height: 20px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.ne-name { font-size: 12px; color: var(--text); }
+
+.ne-dropdown {
+  position: absolute; top: 34px; right: 0; z-index: 300;
+  min-width: 200px; background: var(--bg-elev-3);
+  border: 1px solid var(--border-strong); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 16px; text-align: center;
+}
+.qr-gen-btn { padding: 10px 20px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 13px; }
+.qr-gen-btn:hover { opacity: 0.9; }
+.qr-loading { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
+.spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.qr-show { position: relative; display: flex; justify-content: center; }
+.qr-img { width: 160px; height: 160px; border-radius: 8px; background: #fff; padding: 6px; }
+.qr-expired { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); border-radius: 8px; color: #fff; font-size: 12px; cursor: pointer; }
+.qr-msg { font-size: 11px; color: var(--text-tertiary); margin: 8px 0 0; }
+.ne-logged-info { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ne-avatar-lg { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+.ne-logged-info span { font-size: 13px; color: var(--text); }
+.ne-logout-btn { padding: 6px 16px; border-radius: 6px; font-size: 12px; color: var(--text-tertiary); border: 1px solid var(--border); }
+.ne-logout-btn:hover { color: var(--accent); border-color: var(--accent); }
+.dropdown-enter-active, .dropdown-leave-active { transition: all 0.15s; }
+.dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-8px); }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 /* Window controls (rightmost) */
 .win-ctrls {

@@ -2,16 +2,11 @@
 import { ref, computed, onMounted, onUnmounted } from "vue";
 
 const props = withDefaults(defineProps<{
-  /** 0..1 progress fraction */
   modelValue: number;
-  /** 0..1 buffered fraction (optional) */
   buffered?: number;
-  /** tooltip formatter: receives 0..1, returns string */
   format?: (v: number) => string;
-  /** always show tooltip while hovering, otherwise only when dragging */
   alwaysShowOnHover?: boolean;
   height?: number;
-  handleSize?: number;
   accent?: string;
   trackColor?: string;
   bufferedColor?: string;
@@ -20,11 +15,10 @@ const props = withDefaults(defineProps<{
   buffered: 0,
   format: (v: number) => `${Math.round(v * 100)}%`,
   alwaysShowOnHover: true,
-  height: 4,
-  handleSize: 12,
-  accent: "var(--accent)",
-  trackColor: "rgba(255,255,255,0.18)",
-  bufferedColor: "rgba(255,255,255,0.32)",
+  height: 3,
+  accent: "#3b82f6",
+  trackColor: "rgba(255,255,255,0.15)",
+  bufferedColor: "transparent",
   disabled: false,
 });
 
@@ -42,7 +36,7 @@ const hovering = ref(false);
 const pct = computed(() => Math.max(0, Math.min(1, props.modelValue)) * 100);
 const bufPct = computed(() => Math.max(0, Math.min(1, props.buffered || 0)) * 100);
 
-const hoverPos = ref(0); // 0..1, position of cursor along the bar
+const hoverPos = ref(0);
 const showTooltip = computed(() => dragging.value || (hovering.value && props.alwaysShowOnHover));
 
 function clientToFrac(clientX: number): number {
@@ -123,10 +117,10 @@ onUnmounted(() => {
   <div
     ref="rootRef"
     class="rnp-slider"
-    :class="{ disabled, dragging }"
+    :class="{ disabled, dragging, hovering }"
     :style="{
       '--track-h': height + 'px',
-      '--handle-s': handleSize + 'px',
+      '--track-h-hover': (height + 4) + 'px',
       '--accent': accent,
       '--track-color': trackColor,
       '--buf-color': bufferedColor,
@@ -136,7 +130,6 @@ onUnmounted(() => {
     <div class="track">
       <div class="buf" :style="{ width: bufPct + '%' }" />
       <div class="fill" :style="{ width: pct + '%' }" />
-      <div class="handle" :style="{ left: pct + '%' }" />
     </div>
     <Transition name="fade-tooltip">
       <div v-if="showTooltip" class="tooltip" :style="{ left: tooltipLeft }">
@@ -160,18 +153,20 @@ onUnmounted(() => {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* 纯进度条，无圆形把手 */
 .track {
   position: relative;
   width: 100%;
   height: var(--track-h);
   background: var(--track-color);
   border-radius: 999px;
-  overflow: visible;
+  overflow: hidden;
   transition: height 0.15s var(--ease-out);
 }
-.rnp-slider:hover .track,
+/* hover 或拖动时进度条变粗 */
+.rnp-slider.hovering .track,
 .rnp-slider.dragging .track {
-  height: calc(var(--track-h) + 2px);
+  height: var(--track-h-hover);
 }
 .buf {
   position: absolute;
@@ -180,27 +175,13 @@ onUnmounted(() => {
   background: var(--buf-color);
   border-radius: 999px;
 }
+/* 已播放/已播放部分有色（默认蓝色） */
 .fill {
   position: absolute;
   inset: 0 auto 0 0;
   height: 100%;
   background: var(--accent);
   border-radius: 999px;
-}
-.handle {
-  position: absolute;
-  top: 50%;
-  width: var(--handle-s);
-  height: var(--handle-s);
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
-  transform: translate(-50%, -50%) scale(0);
-  transition: transform 0.18s var(--ease-out);
-}
-.rnp-slider:hover .handle,
-.rnp-slider.dragging .handle {
-  transform: translate(-50%, -50%) scale(1);
 }
 .tooltip {
   position: absolute;

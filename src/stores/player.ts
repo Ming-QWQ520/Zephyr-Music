@@ -1,7 +1,33 @@
 import { defineStore } from "pinia";
 import type { Song, LyricLine, RepeatMode, ViewKey } from "@/types";
 import { fetchLyrics } from "@/api/music";
-import { songUrlV1 as songUrl, lyric, type NeteaseSong } from "@/api/netease";
+import { songUrlV1 as songUrl, lyricNew, lyric, parseYrc, type NeteaseSong, type AudioLevel } from "@/api/netease";
+import { log } from "@/composables/logger";
+import { useSettings } from "@/components/SettingsPanel.vue";
+
+const SESSION_KEY = "zephyr-session";
+
+interface SessionData {
+  queue: Song[];
+  currentIndex: number;
+  currentTime: number;
+  volume: number;
+  muted: boolean;
+}
+
+function loadSession(): SessionData | null {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    if (d.queue && Array.isArray(d.queue) && d.queue.length > 0) return d;
+  } catch { /* ignore */ }
+  return null;
+}
+
+function saveSession(data: SessionData) {
+  try { localStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+}
 
 interface State {
   queue: Song[]; currentIndex: number; isPlaying: boolean;
@@ -10,17 +36,25 @@ interface State {
   lyrics: LyricLine[]; activeLyricIndex: number;
   currentView: ViewKey; searchKeyword: string; history: Song[];
   previousView: ViewKey | null;
+  pendingPlaylistId: number | null;
+  /** 当前播放队列来源的歌单 ID（用于听歌打卡 sourceid） */
+  sourcePlaylistId: number | null;
 }
 
 export const usePlayerStore = defineStore("player", {
-  state: (): State => ({
-    queue: [], currentIndex: -1, isPlaying: false,
-    currentTime: 0, duration: 0, buffered: 0,
-    volume: 0.8, muted: false, shuffle: false, repeat: "off",
-    lyrics: [], activeLyricIndex: -1,
-    currentView: "search", searchKeyword: "", history: [],
-    previousView: null,
-  }),
+  state: (): State => {
+    const session = loadSession();
+    return {
+      queue: session?.queue || [], currentIndex: session?.currentIndex ?? -1, isPlaying: false,
+      currentTime: session?.currentTime || 0, duration: 0, buffered: 0,
+      volume: session?.volume ?? 0.8, muted: session?.muted ?? false, shuffle: false, repeat: "off",
+      lyrics: [], activeLyricIndex: -1,
+      currentView: "netease", searchKeyword: "", history: [],
+      previousView: null,
+      pendingPlaylistId: null,
+      sourcePlaylistId: null,
+    } as State;
+  },
   getters: {
     currentSong(s): Song | null { return s.currentIndex >= 0 && s.currentIndex < s.queue.length ? s.queue[s.currentIndex] : null; },
     hasNext(s): boolean { return s.queue.length > 0 && (s.repeat === "all" || s.currentIndex < s.queue.length - 1); },
@@ -33,6 +67,8 @@ export const usePlayerStore = defineStore("player", {
     openFullscreenPlayer() { if (this.currentView !== "nowplaying") this.previousView = this.currentView; this.currentView = "nowplaying"; },
     closeFullscreenPlayer() { this.currentView = this.previousView || "search"; this.previousView = null; },
     setSearchKeyword(kw: string) { this.searchKeyword = kw; },
+    /** 设置当前播放队列来源的歌单 ID（用于听歌打卡 sourceid） */
+    setSourcePlaylistId(id: number | null) { this.sourcePlaylistId = id; },
 
     /** 播放一首歌。如果是网易云歌曲（source=netease），动态获取 URL 和歌词。 */
     async playNow(song: Song) {
@@ -68,33 +104,77 @@ export const usePlayerStore = defineStore("player", {
       this.queue.splice(this.currentIndex + 1, 0, song);
     },
 
-    /** 网易云歌曲：获取播放 URL + 歌词 URL，patch 回 queue */
+    /** 网易云歌曲：获取播放 URL，patch 回 queue */
     async _ensureNeteaseUrl(song: Song) {
       if (!song.neteaseId) return;
       try {
-        const res = await songUrl(song.neteaseId);
+        const { settings } = useSettings();
+        const level = (settings as any).audioLevel || "exhigh";
+        const res = await songUrl(song.neteaseId, level);
         const d = res.data?.[0];
         if (d?.url) {
           song.url = d.url;
-          // patch queue 里的对应歌曲
           const idx = this.queue.findIndex(s => s.id === song.id);
           if (idx >= 0) this.queue[idx].url = d.url;
         }
       } catch { /* ignore */ }
-      // 获取歌词 URL（用 data URL 形式存储，避免额外请求）
-      if (!song.lrc && song.neteaseId) {
+    },
+
+    /** 网易云歌词获取：优先逐字 yrc，回退普通 lrc */
+    async _ensureNeteaseLyrics(song: Song) {
+      if (!song.neteaseId || song.lrc) return;
+      let lrcText = "";
+      let tlyric = "";
+      try {
+        const newRes = await lyricNew(song.neteaseId);
+        log.info("lyrics", "lyricNew response", { keys: Object.keys(newRes), hasYrc: !!newRes.yrc?.lyric, songId: song.neteaseId, songName: song.name });
+        if (newRes.yrc?.lyric) {
+          const parsed = parseYrc(newRes.yrc.lyric);
+          log.info("lyrics", "yrc parsed", { lines: parsed.length, firstLine: parsed[0]?.text || "" });
+          if (parsed.length > 0) {
+            // 存储原始 yrc 文本到 song 上（用于逐字渲染）
+            (song as any).yrcText = newRes.yrc.lyric;
+            const idx2 = this.queue.findIndex(s => s.id === song.id);
+            if (idx2 >= 0) (this.queue[idx2] as any).yrcText = newRes.yrc.lyric;
+            // 转标准 LRC 格式
+            lrcText = parsed.map(l => {
+              const min = String(Math.floor(l.time / 60)).padStart(2, "0");
+              const sec = String(Math.floor(l.time % 60)).padStart(2, "0");
+              const ms = String(Math.floor((l.time % 1) * 1000)).padStart(3, "0").slice(0, 2);
+              return `[${min}:${sec}.${ms}]${l.text}`;
+            }).join("\n");
+            log.info("lyrics", "using yrc (逐字歌词)", { lrcLen: lrcText.length });
+          }
+        }
+        if (newRes.tlyric?.lyric) {
+          tlyric = newRes.tlyric.lyric;
+          log.info("lyrics", "got tlyric", { tlyricLen: tlyric.length });
+        }
+      } catch (e) { log.warn("lyrics", "lyricNew error", { error: String(e) }); }
+      if (!lrcText) {
+        log.info("lyrics", "no yrc, fallback to /lyric", { songId: song.neteaseId });
         try {
           const lrcRes = await lyric(song.neteaseId);
           if (lrcRes.lrc?.lyric) {
-            // 把歌词内容存成 data URL，fetchLyrics 能直接解析
-            const lrcText = lrcRes.lrc.lyric;
-            const tlyric = lrcRes.tlyric?.lyric || "";
-            const fullLrc = tlyric ? lrcText + "\n" + tlyric : lrcText;
-            song.lrc = "data:text/plain;charset=utf-8," + encodeURIComponent(fullLrc);
-            const idx = this.queue.findIndex(s => s.id === song.id);
-            if (idx >= 0) this.queue[idx].lrc = song.lrc;
+            lrcText = lrcRes.lrc.lyric;
+            if (!tlyric) tlyric = lrcRes.tlyric?.lyric || "";
+            log.info("lyrics", "got lrc from /lyric", { lrcLen: lrcText.length });
           }
-        } catch { /* ignore */ }
+        } catch (e) { log.warn("lyrics", "lyric error", { error: String(e) }); }
+      }
+      if (lrcText) {
+        // 只存储原文 LRC（不含翻译），翻译单独存储
+        song.lrc = "data:text/plain;charset=utf-8," + encodeURIComponent(lrcText);
+        if (tlyric) {
+          (song as any).tlyricText = tlyric;
+          const idxT = this.queue.findIndex(s => s.id === song.id);
+          if (idxT >= 0) (this.queue[idxT] as any).tlyricText = tlyric;
+        }
+        const idx = this.queue.findIndex(s => s.id === song.id);
+        if (idx >= 0) this.queue[idx].lrc = song.lrc;
+        log.info("lyrics", "lyrics stored", { lrcLen: lrcText.length, hasYrc: !!(song as any).yrcText, hasTlyric: !!tlyric, tlyricLen: tlyric.length });
+      } else {
+        log.warn("lyrics", "no lyrics found", { songId: song.neteaseId, songName: song.name });
       }
     },
 
@@ -158,38 +238,73 @@ export const usePlayerStore = defineStore("player", {
     },
     async loadLyrics(song: Song) {
       this.lyrics = []; this.activeLyricIndex = -1;
+      // 网易云歌曲：如果歌词还没获取，先获取（与 URL 解耦）
+      if (song.source === "netease" && song.neteaseId && !song.lrc) {
+        await this._ensureNeteaseLyrics(song);
+      }
       if (!song.lrc) return;
       // data URL 格式的歌词（网易云）
       if (song.lrc.startsWith("data:text/plain")) {
         try {
           const text = decodeURIComponent(song.lrc.split(",")[1] || "");
-          this.lyrics = this._parseLrc(text);
+          const tlyricText = (song as any).tlyricText || "";
+          this.lyrics = this._parseLrc(text, tlyricText);
         } catch { this.lyrics = []; }
         return;
       }
       try { this.lyrics = await fetchLyrics(song.lrc); } catch { this.lyrics = []; }
     },
-    /** 简单 LRC 解析（用于网易云 data URL 歌词） */
-    _parseLrc(text: string): LyricLine[] {
-      const lines: LyricLine[] = [];
-      const re = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/g;
-      for (const raw of text.split("\n")) {
-        const matches = [...raw.matchAll(re)];
-        if (!matches.length) continue;
-        const content = raw.replace(re, "").trim();
-        if (!content) continue;
-        for (const m of matches) {
-          const min = parseInt(m[1]), sec = parseInt(m[2]), ms = parseInt(m[3]);
-          const time = min * 60 + sec + ms / 1000;
-          lines.push({ time, text: content });
+    /** LRC 解析（用于网易云 data URL 歌词）
+     *  原文 LRC 和翻译 tlyric 分开解析，然后按最近时间戳匹配翻译到原文行。
+     *  这比合并文本方式更准确，能正确处理原文本身含括号的情况。 */
+    _parseLrc(text: string, tlyricText = ""): LyricLine[] {
+      const parseLines = (raw: string): { time: number; text: string }[] => {
+        const out: { time: number; text: string }[] = [];
+        const re = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/g;
+        for (const line of raw.split("\n")) {
+          const matches = [...line.matchAll(re)];
+          if (!matches.length) continue;
+          const content = line.replace(re, "").trim();
+          if (!content) continue;
+          for (const m of matches) {
+            const min = parseInt(m[1]), sec = parseInt(m[2]), ms = parseInt(m[3]);
+            const time = min * 60 + sec + ms / 1000;
+            out.push({ time, text: content });
+          }
         }
+        return out.sort((a, b) => a.time - b.time);
+      };
+      const origLines = parseLines(text);
+      const transLines = tlyricText ? parseLines(tlyricText) : [];
+      // 按最近时间戳匹配翻译
+      for (const orig of origLines) {
+        let bestDiff = 999;
+        let bestTrans = "";
+        for (const tl of transLines) {
+          const diff = Math.abs(tl.time - orig.time);
+          if (diff < bestDiff && diff < 3.0) {
+            bestDiff = diff;
+            bestTrans = tl.text;
+          }
+        }
+        if (bestTrans) (orig as any).translation = bestTrans;
       }
-      return lines.sort((a, b) => a.time - b.time);
+      return origLines as LyricLine[];
     },
     pushHistory(song: Song) {
       this.history = this.history.filter(s => s.id !== song.id);
       this.history.unshift(song);
       if (this.history.length > 50) this.history.length = 50;
+    },
+    /** 保存当前会话到 localStorage（播放队列、进度、音量） */
+    saveSession() {
+      saveSession({
+        queue: this.queue,
+        currentIndex: this.currentIndex,
+        currentTime: this.currentTime,
+        volume: this.volume,
+        muted: this.muted,
+      });
     },
   },
 });

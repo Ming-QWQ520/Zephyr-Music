@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { searchSongs } from "@/api/music";
+import { searchSongs as neSearch, neteaseSongToSong } from "@/api/netease";
 import { pickLocalAudioFiles } from "@/api/localMusic";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
@@ -30,9 +30,10 @@ async function doSearch(kw: string) {
   loading.value = true;
   errorMsg.value = "";
   try {
-    const list = await searchSongs(trimmed, 12);
-    results.value = list;
-    if (!list.length) errorMsg.value = "没有找到结果";
+    const res = await neSearch(trimmed, 12);
+    const songs = res.result?.songs || [];
+    results.value = songs.map(neteaseSongToSong);
+    if (!results.value.length) errorMsg.value = "没有找到结果";
   } catch (e) {
     results.value = [];
     errorMsg.value = String(e instanceof Error ? e.message : e);

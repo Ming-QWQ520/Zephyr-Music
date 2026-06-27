@@ -5,6 +5,7 @@ import {
   isLocalFile, rodioPlay, rodioPause, rodioResume, rodioStop,
   rodioSetVolume,
 } from "@/composables/rodioBridge";
+import { scrobble } from "@/api/netease";
 
 export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   const store = usePlayerStore();
@@ -13,6 +14,51 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   const ensureAudio = (): HTMLAudioElement | null => audioRef.value;
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let songLoading = false;
+
+  // ===== 听歌打卡 =====
+  // 每次切换歌曲时调用 /scrobble 接口，传入 id、sourceid、time
+  let lastScrobbledSongId: number | null = null;
+
+  function doScrobble(song: { neteaseId?: number; name?: string; artist?: string; duration?: number } | null) {
+    if (!song || !song.neteaseId) return;
+    // 同一首歌不重复打卡（防止 currentIndex 变化但歌曲未变时重复调用）
+    if (lastScrobbledSongId === song.neteaseId) return;
+    lastScrobbledSongId = song.neteaseId;
+    const sourceid = store.sourcePlaylistId;
+    if (!sourceid) {
+      log.info(TAG, "scrobble skipped (no sourcePlaylistId)", { songId: song.neteaseId });
+      return;
+    }
+    const playTime = Math.floor(store.currentTime || 0);
+    scrobble(song.neteaseId, sourceid, playTime).then(() => {
+      log.info(TAG, "scrobble ok", { songId: song.neteaseId, sourceid, time: playTime });
+    }).catch((e) => {
+      log.warn(TAG, "scrobble failed", { error: String(e) });
+    });
+  }
+
+  // 更新窗口标题栏 + 任务栏标题为 "歌曲名 - 歌手"，并在切换歌曲时打卡
+  watch(
+    () => store.currentSong,
+    async (song, oldSong) => {
+      const title = song ? `${song.name} - ${song.artist}` : "Zephyr · 音乐";
+      document.title = title;
+      try {
+        const mod = await import("@tauri-apps/api/window");
+        const w = mod.getCurrentWindow?.() ?? (mod as any).window?.();
+        if (w) await w.setTitle(title);
+      } catch { /* ignore if not in Tauri */ }
+      // 切换歌曲时打卡（网易云歌曲）
+      if (song && song.source === "netease" && song.neteaseId) {
+        if (!oldSong || oldSong.neteaseId !== song.neteaseId) {
+          doScrobble(song);
+        }
+      } else {
+        lastScrobbledSongId = null;
+      }
+    },
+    { immediate: true }
+  );
 
   watch(
     () => store.currentSong?.url,

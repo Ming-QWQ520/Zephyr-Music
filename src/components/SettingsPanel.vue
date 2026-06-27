@@ -26,6 +26,7 @@ export interface PlayerSettings {
   coverHAlign: HAlign;
   coverVAlign: VAlign;
   rectangleCover: boolean;
+  coverQuality: number; // 200/300/400/500
   coverShadow: boolean;
 
   // Background
@@ -55,6 +56,9 @@ export interface PlayerSettings {
   lyricStagger: number; // 0..1 stagger amount
   animationTiming: AnimationTiming;
 
+  // Audio
+  audioLevel: string; // standard/higher/exhigh/lossless/hires/jyeffect/sky/dolby/jymaster
+
   // Misc
   hidePlayerControls: boolean;
   autoHideMiniInfo: boolean;
@@ -83,6 +87,7 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   coverHAlign: "left",
   coverVAlign: "center",
   rectangleCover: false,
+  coverQuality: 300,
   coverShadow: true,
 
   bgType: "blur",
@@ -108,6 +113,8 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   currentLyricAlign: "left",
   lyricStagger: 0.4,
   animationTiming: "smooth",
+
+  audioLevel: "exhigh",
 
   hidePlayerControls: false,
   autoHideMiniInfo: true,
@@ -368,6 +375,17 @@ const APP_VERSION = "1.0.0";
                 <div class="label">矩形封面</div>
                 <button class="switch" :class="{ on: settings.rectangleCover }" @click="settings.rectangleCover = !settings.rectangleCover" />
               </div>
+              <div class="row">
+                <div class="label">封面清晰度</div>
+                <div class="seg">
+                  <button
+                    v-for="m in [200, 300, 400, 500] as const"
+                    :key="m"
+                    :class="{ active: settings.coverQuality === m }"
+                    @click="settings.coverQuality = m"
+                  >{{ m }}p</button>
+                </div>
+              </div>
               <div class="row toggle">
                 <div class="label">封面阴影</div>
                 <button class="switch" :class="{ on: settings.coverShadow }" @click="settings.coverShadow = !settings.coverShadow" />
@@ -534,6 +552,17 @@ const APP_VERSION = "1.0.0";
             <!-- Misc -->
             <section v-show="activeTab === 'misc'" class="tab-pane">
               <h3>杂项</h3>
+              <div class="row">
+                <div class="label">音质</div>
+                <div class="seg audio-level-seg">
+                  <button
+                    v-for="m in ['standard', 'higher', 'exhigh', 'lossless', 'hires', 'jyeffect', 'sky', 'dolby', 'jymaster'] as const"
+                    :key="m"
+                    :class="{ active: settings.audioLevel === m }"
+                    @click="settings.audioLevel = m"
+                  >{{ ({ standard: '标准', higher: '较高', exhigh: '极高', lossless: '无损', hires: 'Hi-Res', jyeffect: '高清环绕', sky: '沉浸环绕', dolby: '杜比全景', jymaster: '超清母带' } as const)[m] }}</button>
+                </div>
+              </div>
               <div class="row toggle">
                 <div class="label">隐藏播放控件</div>
                 <button class="switch" :class="{ on: settings.hidePlayerControls }" @click="settings.hidePlayerControls = !settings.hidePlayerControls" />

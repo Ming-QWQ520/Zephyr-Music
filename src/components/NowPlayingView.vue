@@ -305,39 +305,139 @@ interface ParsedLyric {
   translation?: string;
   romaji?: string;
   isInterlude?: boolean;
+  /** 逐字数据：如果歌曲有 yrc，这里存储每个字的时间信息 */
+  words?: { start: number; duration: number; text: string }[];
+  /** 括号内的中文补充歌词（换行显示） */
+  subText?: string;
 }
 
 /**
- * Parse a single raw lyric line that may be in the format:
- *   "original(translation)"
- * or
- *   "original（translation）"
- * Returns { text, translation }.
+ * Parse a single raw lyric line. If the line ends with (xxx) or （xxx）
+ * AND the content inside is primarily non-CJK (foreign text), treat it as
+ * a translation. Chinese lyrics often use () for supplementary lyrics,
+ * so we extract those as a separate "subText" that will be displayed
+ * on a new line below the main lyric.
  */
-function parseLyricLine(raw: string): { text: string; translation?: string } {
+function parseLyricLine(raw: string): { text: string; translation?: string; subText?: string } {
   const t = raw.trim();
-  // Match trailing (...) or （...）
   const m = t.match(/^(.*?)[(（]([^)）]+)[)）]\s*$/);
   if (m) {
-    return { text: m[1].trim(), translation: m[2].trim() };
+    const mainText = m[1].trim();
+    const inside = m[2].trim();
+    const cjkCount = (inside.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length;
+    if (cjkCount === 0) {
+      // 完全无CJK → 翻译
+      return { text: mainText, translation: inside };
+    } else {
+      // 含任何CJK → 补充歌词，换行显示
+      return { text: mainText, subText: inside };
+    }
   }
   return { text: t };
 }
 
+/** 逐字歌词行：解析 yrc 格式的一行为 { words, startTime } */
+interface YrcWord { start: number; duration: number; text: string; }
+interface YrcLine { startTime: number; words: YrcWord[]; text: string; }
+
+/** 解析完整 yrc 文本为结构化逐字行数组 */
+function parseYrcLines(yrcText: string): YrcLine[] {
+  const lines: YrcLine[] = [];
+  for (const raw of yrcText.split("\n")) {
+    const m = raw.match(/^\[(\d+),(\d+)\]/);
+    if (!m) continue;
+    const startTime = parseInt(m[1]) / 1000;
+    const words: YrcWord[] = [];
+    // 提取每个字：(startMs,durationMs,0)文字
+    const wordRe = /\((\d+),(\d+),\d+\)([^(]+)/g;
+    let wm;
+    let fullText = "";
+    while ((wm = wordRe.exec(raw)) !== null) {
+      const wStart = parseInt(wm[1]) / 1000;
+      const wDur = parseInt(wm[2]) / 1000;
+      const wText = wm[3];
+      words.push({ start: wStart, duration: wDur, text: wText });
+      fullText += wText;
+    }
+    if (words.length > 0) {
+      lines.push({ startTime, words, text: fullText.trim() });
+    }
+  }
+  return lines;
+}
+
+/** 当前歌曲的逐字歌词数据 */
+const yrcLines = ref<YrcLine[]>([]);
+
+/** 当歌曲变化时，重新解析 yrc */
+watch(() => store.currentSong, (song) => {
+  const yrcText = (song as any)?.yrcText;
+  if (yrcText) {
+    yrcLines.value = parseYrcLines(yrcText);
+  } else {
+    yrcLines.value = [];
+  }
+}, { immediate: true });
+
+/** 匹配 store.lyrics 中的行到 yrcLines，合并逐字数据 */
 const parsedLyrics = computed<ParsedLyric[]>(() => {
-  const out: ParsedLyric[] = [];
   const src = store.lyrics;
+
+  // 如果有逐字歌词，直接用 yrcLines 作为歌词源（避免时间戳转换误差）
+  if (yrcLines.value.length > 0) {
+    const out: ParsedLyric[] = [];
+    // 翻译现在直接存储在 store.lyrics[i].translation 中（由 _parseLrc 匹配）
+    // 按 yrc 行的时间戳查找最近的 store.lyrics 行，取其 translation
+    const transMap = new Map<number, string>();
+    for (const cur of src) {
+      if ((cur as any).translation) {
+        transMap.set(Math.round(cur.time * 100), (cur as any).translation);
+      }
+    }
+
+    for (let i = 0; i < yrcLines.value.length; i++) {
+      const yl = yrcLines.value[i];
+      const next = yrcLines.value[i + 1];
+      const gap = next ? next.startTime - yl.startTime : 0;
+      const isInterlude = !yl.text || gap > 8;
+      // 精确匹配 yrc 时间戳，回退到最近 3 秒内的行
+      let translation = transMap.get(Math.round(yl.startTime * 100));
+      if (!translation) {
+        let bestDiff = 999;
+        for (const cur of src) {
+          if (!(cur as any).translation) continue;
+          const diff = Math.abs(cur.time - yl.startTime);
+          if (diff < bestDiff && diff < 3.0) {
+            bestDiff = diff;
+            translation = (cur as any).translation;
+          }
+        }
+      }
+      out.push({
+        time: yl.startTime,
+        text: yl.text || (gap > 8 ? "♪" : ""),
+        translation,
+        isInterlude: !yl.text,
+        words: yl.words,
+      });
+    }
+    return out;
+  }
+
+  // 无逐字歌词：普通处理
+  const out: ParsedLyric[] = [];
   for (let i = 0; i < src.length; i++) {
     const cur = src[i];
     const next = src[i + 1];
     const parsed = parseLyricLine(cur.text);
-    // Interlude: long instrumental gap before this line, or empty text
     const gap = next ? next.time - cur.time : 0;
     const isInterlude = !parsed.text || gap > 8;
     out.push({
       time: cur.time,
       text: parsed.text || (gap > 8 ? "♪" : ""),
-      translation: parsed.translation,
+      // tlyric 翻译优先（网易云），回退到 parseLyricLine 提取的翻译（本地歌词）
+      translation: (cur as any).translation || parsed.translation,
+      subText: parsed.subText,
       isInterlude: !parsed.text,
     });
   }
@@ -350,6 +450,21 @@ const INTERLUDE_THRESHOLD = 6; // seconds
 const MAX_INTERLUDE_PX = 0; // interludes collapse to 0 height
 
 const activeIndex = computed(() => store.activeLyricIndex);
+
+// 逐字歌词：计算当前活动行已唱到第几个字（只算一次，而非每字算一次）
+const sungWordCount = computed(() => {
+  const idx = activeIndex.value;
+  if (idx < 0) return 0;
+  const line = parsedLyrics.value[idx];
+  if (!line || !line.words) return 0;
+  const t = store.currentTime;
+  let count = 0;
+  for (const w of line.words) {
+    if (t >= w.start) count++;
+    else break;
+  }
+  return count;
+});
 
 // ----- Lyric engine: each line's absolute transform -----
 const lyricWrapRef = ref<HTMLDivElement | null>(null);
@@ -634,12 +749,9 @@ function lineStyle(idx: number): CSSProperties {
     settings.currentLyricAlign === "center" ? "center" : "left";
   const interlude = parsedLyrics.value[idx]?.isInterlude;
 
-  // RNP-style hover: scale up the hovered line slightly (unless it's the
-  // active line, which is already at scale=1 and shouldn't be displaced).
-  // Reduced from 1.12 to 1.05 — large hover scales caused long lyric lines
-  // to overflow past the right edge of the screen.
-  const hoverScale = isHovered && !isActive ? 1.05 : 1;
-  const finalScale = t.scale * hoverScale;
+  // Hover: no scale change (avoids transform reflow → better performance).
+  // The visual hover effect is done purely via CSS (color + opacity + translateX).
+  const finalScale = t.scale;
 
   // Transform: RNP order = translateX(left) translateY(top+extraTop) scale rotate
   const parts: string[] = [];
@@ -649,10 +761,10 @@ function lineStyle(idx: number): CSSProperties {
   if (t.rotate) parts.push(`rotate(${t.rotate}deg)`);
   const transform = parts.join(" ");
 
-  // Hover brightens the line (raise opacity toward 1)
-  const finalOpacity = isHovered ? Math.min(1, t.opacity + 0.35) : t.opacity;
-  // Hover reduces blur so the hovered line is sharper
-  const finalBlur = isHovered ? Math.max(0, t.blur - 2) : t.blur;
+  // Hover: no opacity/blur/scale change (just CSS background on hover).
+  // This avoids transform reflow and keeps performance high.
+  const finalOpacity = t.opacity;
+  const finalBlur = t.blur;
 
   const height = interlude ? "0" : "auto";
 
@@ -736,9 +848,52 @@ const progressFrac = computed(() => store.progress);
 const bufferedFrac = computed(() => store.bufferedFrac);
 function onSeek(f: number) { store.seekByFraction(f); }
 
+// 音质选择
+const audioLevels = [
+  { key: "standard", label: "标准" },
+  { key: "higher", label: "较高" },
+  { key: "exhigh", label: "极高" },
+  { key: "lossless", label: "无损" },
+  { key: "hires", label: "Hi-Res" },
+  { key: "jyeffect", label: "高清环绕" },
+  { key: "sky", label: "沉浸环绕" },
+  { key: "dolby", label: "杜比全景" },
+  { key: "jymaster", label: "超清母带" },
+];
+function cycleAudioLevel() {
+  const idx = audioLevels.findIndex(l => l.key === settings.audioLevel);
+  const next = audioLevels[(idx + 1) % audioLevels.length];
+  settings.audioLevel = next.key;
+}
+const currentLevelLabel = computed(() => {
+  const l = audioLevels.find(l => l.key === settings.audioLevel);
+  return l ? l.label : "标准";
+});
+
+// 进度条悬停预览：返回对应时间点的歌词文本
+function getLyricAtTime(t: number): string {
+  if (!parsedLyrics.value.length) return formatTime(t);
+  let found = "";
+  for (const line of parsedLyrics.value) {
+    if (line.time <= t && line.text && !line.isInterlude) {
+      found = line.text.length > 30 ? line.text.slice(0, 30) + "..." : line.text;
+    } else if (line.time > t) break;
+  }
+  return found || formatTime(t);
+}
+
 // ----- Song / cover -----
 const song = computed(() => store.currentSong);
-const coverUrl = computed(() => song.value?.pic || "");
+const coverUrl = computed(() => {
+  const pic = song.value?.pic || "";
+  if (!pic) return "";
+  // 网易云封面支持 ?param=NxN 控制清晰度
+  const q = settings.coverQuality || 300;
+  if (pic.includes("music.126.net")) {
+    return pic.replace(/\?param=\d+x\d+/g, "") + `?param=${q}x${q}`;
+  }
+  return pic;
+});
 
 // ----- Lyrics seek-on-click -----
 function seekToLyric(idx: number) {
@@ -821,7 +976,7 @@ const queueList = computed(() => store.queue);
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
         </button>
         <button class="icon-btn" title="设置" @click="showSettings = true">
-          <Icon name="settings" :size="18" />
+          <img src="/icons/settings.svg" alt="settings" class="settings-icon" />
         </button>
       </div>
     </header>
@@ -861,11 +1016,17 @@ const queueList = computed(() => store.queue);
             <Slider
               class="progress"
               :model-value="progressFrac"
-              :buffered="bufferedFrac"
-              :format="(v) => formatTime(v * store.duration)"
+              :always-show-on-hover="true"
+              :format="(v) => getLyricAtTime(v * store.duration)"
               @change="onSeek"
             />
             <span class="time">{{ formatTime(store.duration) }}</span>
+          </div>
+          <!-- 音质选择 -->
+          <div class="level-row">
+            <button class="level-pill" @click="cycleAudioLevel">
+              {{ currentLevelLabel }}
+            </button>
           </div>
           <div class="controls">
             <button
@@ -902,7 +1063,7 @@ const queueList = computed(() => store.queue);
             <Slider
               class="volume"
               :model-value="volumeFrac"
-              :format="(v) => `${Math.round(v * 100)}%`"
+              :format="() => ''"
               :always-show-on-hover="false"
               :height="3"
               @change="onVolume"
@@ -941,7 +1102,18 @@ const queueList = computed(() => store.queue);
               @mouseleave="onLyricLeave()"
             >
               <span class="lyric-text" :class="{ 'text-shadow': settings.textShadow, 'text-glow': settings.textGlow }">
-                {{ line.text }}
+                <template v-if="line.words && line.words.length > 0">
+                  <span
+                    v-for="(word, wi) in line.words"
+                    :key="wi"
+                    class="lyric-word"
+                    :class="{ sung: idx === activeIndex && wi < sungWordCount }"
+                  >{{ word.text }}</span>
+                </template>
+                <template v-else>{{ line.text }}</template>
+              </span>
+              <span v-if="line.subText" class="lyric-subtext">
+                {{ line.subText }}
               </span>
               <span v-if="line.translation && settings.showTranslation" class="lyric-translation">
                 {{ line.translation }}
@@ -1038,14 +1210,16 @@ const queueList = computed(() => store.queue);
   background-position: center;
   background-repeat: no-repeat;
   background-size: cover;
-  filter: saturate(1.5) brightness(0.6);
-  transform: scale(1.15);
-  animation: fluid-pan 30s ease-in-out infinite alternate;
+  filter: saturate(2) brightness(0.5) blur(2px);
+  transform: scale(1.2);
+  animation: fluid-pan 25s ease-in-out infinite alternate;
 }
 @keyframes fluid-pan {
-  0% { transform: scale(1.15) translate(0, 0); }
-  50% { transform: scale(1.2) translate(-2%, 1%); }
-  100% { transform: scale(1.15) translate(2%, -1%); }
+  0% { transform: scale(1.2) translate(0, 0) rotate(0deg); }
+  25% { transform: scale(1.25) translate(-3%, 2%) rotate(0.5deg); }
+  50% { transform: scale(1.2) translate(2%, -2%) rotate(-0.5deg); }
+  75% { transform: scale(1.25) translate(-1%, 3%) rotate(0.3deg); }
+  100% { transform: scale(1.2) translate(3%, -1%) rotate(-0.3deg); }
 }
 .rnp-bg-gradient {
   background-size: 400% 400%;
@@ -1130,6 +1304,7 @@ const queueList = computed(() => store.queue);
   color: #fff;
   background: rgba(255, 255, 255, 0.1);
 }
+.settings-icon { width: 18px; height: 18px; display: inline-block; pointer-events: none; }
 
 /* ----- Main split: left 45% (cover+controls), right 55% (lyrics) ----- */
 .np-main {
@@ -1168,14 +1343,17 @@ const queueList = computed(() => store.queue);
 /* ----- Left pane (cover + controls) ----- */
 .left-pane {
   position: relative;
-  z-index: 1; /* below right-pane (lyrics, z-index:5) so rotated lyrics
-                  are never occluded by the cover */
+  z-index: 1;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
   gap: 20px;
   min-height: 0;
+  /* No background on left-pane itself — it's transparent so rotated
+     lyrics from right-pane (z-index:5) can extend over it without
+     being occluded. Only individual child elements (cover, controls)
+     have their own backgrounds. */
 }
 .left-pane.halign-center { align-items: center; }
 .left-pane.halign-right { align-items: flex-end; }
@@ -1242,11 +1420,19 @@ const queueList = computed(() => store.queue);
   width: min(340px, 28vw);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   transition: opacity 0.3s var(--ease-out), max-height 0.3s var(--ease-out), margin 0.3s var(--ease-out);
   max-height: 320px;
-  overflow: hidden;
+  overflow: visible; /* allow tooltip to show above progress bar */
 }
+/* 音质选择 pill */
+.level-row { display: flex; justify-content: center; }
+.level-pill {
+  padding: 3px 12px; border-radius: 12px;
+  background: var(--bg-elev-3); color: var(--text-secondary);
+  font-size: 11px; font-weight: 500; transition: all 0.15s;
+}
+.level-pill:hover { color: var(--accent); background: var(--accent-soft); }
 /* When hidePlayerControls is on, ALL playback controls (progress bar, play/
  * prev/next/shuffle buttons, volume slider) collapse to zero height and
  * disappear entirely. Only the cover and song info remain, and the cover
@@ -1294,17 +1480,14 @@ const queueList = computed(() => store.queue);
 .ctrl-btn:active { transform: scale(0.92); }
 .ctrl-btn.active { color: var(--accent); }
 .ctrl-btn[disabled] { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
+/* 播放按钮：无圆形白色背景，与其他按钮一致 */
 .ctrl-btn.play {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: #fff;
-  color: #000;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  width: 44px;
+  height: 44px;
+  color: var(--text);
 }
 .ctrl-btn.play:hover {
-  background: #fff;
-  color: #000;
+  color: #fff;
   transform: scale(1.06);
 }
 .controls {
@@ -1393,16 +1576,10 @@ const queueList = computed(() => store.queue);
 }
 .lyric-line.passed { color: rgba(255, 255, 255, 0.42); }
 .lyric-line:not(.active) { color: rgba(255, 255, 255, 0.55); }
-/* RNP-style hover: brighten the hovered (non-active) line toward white,
-   add a soft rounded border (via box-shadow so it doesn't shift layout)
-   and a subtle translucent background. This matches the RNP look where
-   hovering a lyric line shows a clear bordered highlight. */
+/* Hover: brighter background, no text highlight change.
+   No border, no scale — only background + transition, GPU-cheap. */
 .lyric-line.hovered:not(.active) {
-  color: rgba(255, 255, 255, 0.95);
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow:
-    inset 0 0 0 1px rgba(255, 255, 255, 0.35),
-    0 0 18px rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.15);
 }
 .lyric-line.interlude {
   pointer-events: none;
@@ -1412,6 +1589,21 @@ const queueList = computed(() => store.queue);
   line-height: 1.35;
   font-weight: inherit;
   text-align: inherit;
+}
+/* 逐字歌词：每个字一个 span */
+.lyric-word {
+  display: inline;
+  transition: color 0.25s ease, opacity 0.25s ease;
+  opacity: 0.5;
+}
+/* 已唱的字：高亮白色 */
+.lyric-word.sung {
+  color: #fff;
+  opacity: 1;
+}
+/* 未唱的字（活动行内）：半透明 */
+.lyric-line.active .lyric-word:not(.sung) {
+  color: rgba(255, 255, 255, 0.4);
 }
 .lyric-text.text-shadow { text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
 .lyric-text.text-glow {
@@ -1430,6 +1622,15 @@ const queueList = computed(() => store.queue);
      lyric-align-left/center/right). This ensures translations line up
      under the main lyric text. */
   text-align: inherit;
+}
+.lyric-subtext {
+  display: block;
+  font-size: 0.75em;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: inherit;
+  margin-top: 2px;
 }
 .lyric-romaji {
   display: block;

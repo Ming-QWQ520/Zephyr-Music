@@ -10,6 +10,6 @@ export interface Song {
   neteaseId?: number;
   duration?: number;
 }
-export interface LyricLine { time: number; text: string; }
+export interface LyricLine { time: number; text: string; translation?: string; }
 export type ViewKey = "search" | "nowplaying" | "queue" | "library" | "netease";
 export type RepeatMode = "off" | "all" | "one";
