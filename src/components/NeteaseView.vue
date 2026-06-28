@@ -30,6 +30,38 @@ const recordType = ref<0 | 1>(1);
 const isRecordView = ref(false);
 /** 听歌排行播放次数映射（songId → playCount） */
 const playCountMap = ref<Map<string, number>>(new Map());
+/** 当前列表歌曲的喜欢状态集合（neteaseId → liked） */
+const songLikedSet = ref<Set<number>>(new Set());
+
+/** 加载当前列表歌曲的喜欢状态 */
+async function loadSongLikedStatus() {
+  if (currentPlaylistSongs.value.length === 0) return;
+  try {
+    const likeSet = await getCachedLikeList();
+    const liked = new Set<number>();
+    for (const s of currentPlaylistSongs.value) {
+      if (s.neteaseId && likeSet.has(s.neteaseId)) liked.add(s.neteaseId);
+    }
+    songLikedSet.value = liked;
+  } catch { /* ignore */ }
+}
+
+/** 切换单首歌曲喜欢状态（列表内按钮） */
+async function toggleSongLike(song: Song) {
+  if (song.source !== "netease" || !song.neteaseId) return;
+  const liked = songLikedSet.value.has(song.neteaseId);
+  try {
+    await likeSong(song.neteaseId, !liked);
+    if (!liked) { songLikedSet.value.add(song.neteaseId); addLikeCache(song.neteaseId); }
+    else { songLikedSet.value.delete(song.neteaseId); removeLikeCache(song.neteaseId); }
+    // 触发响应式更新
+    songLikedSet.value = new Set(songLikedSet.value);
+    toast.success(liked ? "已取消喜欢" : "已喜欢", song.name);
+  } catch (e) {
+    log.warn("netease-view", "toggle song like failed", { error: String(e) });
+    toast.error("操作失败", "请稍后重试");
+  }
+}
 
 async function loadData() {
   if (!getCookie()) return;
@@ -45,6 +77,7 @@ async function selectPlaylist(pl: NeteasePlaylist) {
   if (selectedPlaylistId.value === pl.id && currentPlaylistSongs.value.length > 0) return;
   isRecordView.value = false;
   playCountMap.value = new Map();
+  songLikedSet.value = new Set();
   selectedPlaylistId.value = pl.id;
   selectedPlaylistName.value = pl.name;
   selectedPlaylistCover.value = pl.coverImgUrl || "";
@@ -52,6 +85,7 @@ async function selectPlaylist(pl: NeteasePlaylist) {
   try {
     const res = await playlistTrackAll(pl.id);
     currentPlaylistSongs.value = (res.songs || []).map(neteaseSongToSong);
+    loadSongLikedStatus(); // 后台加载喜欢状态
   } catch { currentPlaylistSongs.value = []; }
   loadingSongs.value = false;
 }
@@ -60,6 +94,7 @@ async function loadDailyRecommend() {
   if (selectedPlaylistId.value === -1 && currentPlaylistSongs.value.length > 0) return;
   isRecordView.value = false;
   playCountMap.value = new Map();
+  songLikedSet.value = new Set();
   selectedPlaylistId.value = -1;
   selectedPlaylistName.value = "每日推荐";
   selectedPlaylistCover.value = "";
@@ -67,6 +102,7 @@ async function loadDailyRecommend() {
   try {
     const res = await recommendSongs();
     currentPlaylistSongs.value = (res.data?.dailySongs || []).map(neteaseSongToSong);
+    loadSongLikedStatus();
   } catch { currentPlaylistSongs.value = []; }
   loadingSongs.value = false;
 }
@@ -124,6 +160,7 @@ async function loadRecord(type: 0 | 1 = 1) {
       return song;
     });
     log.info("netease-view", "loadRecord: songs mapped", { count: currentPlaylistSongs.value.length, playCountEntries: playCountMap.value.size });
+    loadSongLikedStatus();
   } catch (e) {
     log.warn("netease-view", "loadRecord error", { error: String(e) });
     currentPlaylistSongs.value = [];
@@ -342,15 +379,21 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
               <div class="song-cover-placeholder" v-else><Icon name="music" :size="10" /></div>
               <span class="song-title-text truncate">{{ song.name }}</span>
             </span>
-            <span class="col-artist truncate">{{ song.artist }}</span>
-            <span v-if="isRecordView" class="col-playcount">{{ getPlayCount(song.id) }} 次</span>
-            <span v-else class="col-dur">
-              {{ song.duration ? formatTime(song.duration) : '--:--' }}
-              <!-- 添加到歌单图标（hover 显示，仅网易云歌曲） -->
-              <button v-if="song.source === 'netease'" class="row-add-pl-btn" title="添加到歌单" @click.stop="openAddToPlaylistDialog(song)">
-                <img src="/icons/add_playlist.svg" alt="add to playlist" class="row-add-pl-icon" />
-              </button>
+            <span class="col-artist">
+              <span class="artist-text truncate">{{ song.artist }}</span>
+              <!-- 喜欢按钮 + 添加到歌单按钮（hover 显示，艺术家右侧） -->
+              <div v-if="song.source === 'netease'" class="row-actions">
+                <button class="row-like-btn" :class="{ liked: songLikedSet.has(song.neteaseId!) }" :title="songLikedSet.has(song.neteaseId!) ? '取消喜欢' : '喜欢'" @click.stop="toggleSongLike(song)">
+                  <img v-if="songLikedSet.has(song.neteaseId!)" src="/icons/like.svg" alt="liked" class="row-action-icon" />
+                  <img v-else src="/icons/not_like.svg" alt="not liked" class="row-action-icon" />
+                </button>
+                <button class="row-add-pl-btn" title="添加到歌单" @click.stop="openAddToPlaylistDialog(song)">
+                  <img src="/icons/add_playlist.svg" alt="add to playlist" class="row-action-icon" />
+                </button>
+              </div>
             </span>
+            <span v-if="isRecordView" class="col-playcount">{{ getPlayCount(song.id) }} 次</span>
+            <span v-else class="col-dur">{{ song.duration ? formatTime(song.duration) : '--:--' }}</span>
           </div>
         </template>
       </div>
@@ -514,16 +557,23 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctx-fade-enter-active, .ctx-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
 .ctx-fade-enter-from, .ctx-fade-leave-to { opacity: 0; transform: scale(0.95); }
 
-/* 歌曲行添加到歌单按钮 */
-.col-dur { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
-.row-add-pl-btn {
-  width: 24px; height: 24px; border-radius: 5px;
+/* 歌曲行操作按钮（喜欢 + 添加到歌单，艺术家右侧） */
+.col-artist { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.artist-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
+.row-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
+.song-trow:hover .row-actions { opacity: 1; }
+/* 已喜欢的歌曲始终显示喜欢图标 */
+.row-like-btn.liked { opacity: 1 !important; }
+.row-like-btn.liked .row-action-icon { filter: none; }
+.row-like-btn, .row-add-pl-btn {
+  width: 26px; height: 26px; border-radius: 5px;
   display: inline-flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity 0.15s, background 0.15s;
+  opacity: 0.5; transition: opacity 0.15s, background 0.15s;
 }
-.song-trow:hover .row-add-pl-btn { opacity: 0.6; }
-.row-add-pl-btn:hover { opacity: 1 !important; background: var(--bg-hover); }
-.row-add-pl-icon { width: 14px; height: 14px; pointer-events: none; }
+.song-trow:hover .row-like-btn, .song-trow:hover .row-add-pl-btn { opacity: 0.7; }
+.row-like-btn:hover, .row-add-pl-btn:hover { opacity: 1 !important; background: var(--bg-hover); }
+.row-like-btn.liked { opacity: 1; }
+.row-action-icon { width: 15px; height: 15px; pointer-events: none; }
 
 /* 添加到歌单对话框 */
 .pl-dialog-overlay {
