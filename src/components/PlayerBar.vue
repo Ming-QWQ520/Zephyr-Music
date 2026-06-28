@@ -136,6 +136,18 @@ watch(() => settings.audioLevel, async () => {
 // 音量 hover
 const volHover = ref(false);
 
+// 鼠标滚轮调节音量：向上增大，向下减小
+function onVolWheel(e: WheelEvent) {
+  e.preventDefault();
+  const step = 0.05; // 每次滚动 5%
+  // deltaY < 0（向上滚）→ 增大音量；deltaY > 0（向下滚）→ 减小音量
+  const delta = e.deltaY < 0 ? step : -step;
+  const newVol = Math.max(0, Math.min(1, store.volume + delta));
+  store.setVolume(newVol);
+  // 滚轮时显示音量弹框
+  volHover.value = true;
+}
+
 // 点击外部关闭音质弹窗
 function onDocClick(e: MouseEvent) {
   if (!levelPopupOpen.value) return;
@@ -222,8 +234,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           </div>
         </Transition>
       </div>
-      <!-- 音量区域（hover 时弹出滑块） -->
-      <div class="vol-wrap" @mouseenter="volHover = true" @mouseleave="volHover = false">
+      <!-- 音量区域（hover 时弹出滑块，滚轮调节） -->
+      <div class="vol-wrap" @mouseenter="volHover = true" @mouseleave="volHover = false" @wheel="onVolWheel">
         <!-- 音量图标（始终显示） -->
         <button class="ctrl-btn vol-icon" :title="store.muted || store.volume === 0 ? '取消静音' : '静音'" @click.stop="toggleMute">
           <Icon :name="store.muted || store.volume === 0 ? 'volumeMute' : store.volume < 0.4 ? 'volumeLow' : 'volume'" :size="18" />

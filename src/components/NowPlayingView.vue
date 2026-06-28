@@ -894,6 +894,14 @@ function cyclePlayMode() {
 const volumeFrac = computed(() => (store.muted ? 0 : store.volume));
 function onVolume(f: number) { store.setVolume(f); }
 function toggleMute() { store.toggleMute(); }
+// 鼠标滚轮调节音量：向上增大，向下减小
+function onVolWheel(e: WheelEvent) {
+  e.preventDefault();
+  const step = 0.05;
+  const delta = e.deltaY < 0 ? step : -step;
+  const newVol = Math.max(0, Math.min(1, store.volume + delta));
+  store.setVolume(newVol);
+}
 
 // ----- Progress -----
 const progressFrac = computed(() => store.progress);
@@ -1119,8 +1127,8 @@ const queueList = computed(() => store.queue);
               <Icon name="list" :size="20" />
             </button>
           </div>
-          <!-- Volume on its own row below controls -->
-          <div class="vol-row">
+          <!-- Volume on its own row below controls (滚轮可调节) -->
+          <div class="vol-row" @wheel="onVolWheel">
             <button class="ctrl-btn vol-icon" :title="store.muted || store.volume === 0 ? '取消静音' : '静音'" @click="toggleMute">
               <Icon :name="store.muted || store.volume === 0 ? 'volumeMute' : store.volume < 0.4 ? 'volumeLow' : 'volume'" :size="18" />
             </button>
