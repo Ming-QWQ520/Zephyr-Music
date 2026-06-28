@@ -25,12 +25,20 @@ async function runSearch(kw: string) {
   errorMsg.value = "";
   try {
     const res = await searchSuggest(trimmed, "mobile");
-    const songs = res.result?.songs || [];
+    // 兼容多种返回格式
+    let songs = res.result?.songs || [];
+    // 如果没有 songs，检查 allMatch（search/suggest 某些情况返回 allMatch）
+    if (songs.length === 0 && (res.result as any)?.allMatch) {
+      // allMatch 只有歌曲名，无法直接播放，跳过
+      log.warn("searchview", "no songs in result, only allMatch");
+    }
     results.value = songs.map(neteaseSongToSong);
+    log.info("searchview", "search done", { kw: trimmed, count: results.value.length, hasPic: results.value.filter(s => s.pic).length });
     if (!results.value.length) errorMsg.value = "没有找到结果，换个关键词试试";
   } catch (e) {
     results.value = [];
     errorMsg.value = String(e instanceof Error ? e.message : e);
+    log.error("searchview", "search failed", { error: String(e) });
   } finally {
     loading.value = false;
   }

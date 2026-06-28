@@ -334,6 +334,9 @@ export interface NeteaseSong {
   album?: { id: number; name: string; picUrl: string };
   dt?: number;
   duration?: number;
+  // search/suggest 可能返回的额外字段
+  song?: NeteaseSong;  // 嵌套 song 对象
+  picUrl?: string;     // 直接的 picUrl
 }
 
 /** 获取音乐 URL */
@@ -341,9 +344,9 @@ export async function songUrl(id: number): Promise<{
   code: number;
   data: { id: number; url: string; br: number; size: number }[];
 }> {
-  log.info(TAG, "songUrl()", { id });
+  log.info("netease-api-music", "→ songUrl()", { id });
   const r = await apiGet("/song/url", { id });
-  log.info(TAG, "songUrl result", { code: r.code, count: r.data?.length || 0, hasUrl: !!r.data?.[0]?.url });
+  log.info("netease-api-music", "← songUrl result", { code: r.code, count: r.data?.length || 0, hasUrl: !!r.data?.[0]?.url });
   return r;
 }
 
@@ -360,9 +363,9 @@ export async function songUrlV1(id: number, level = "exhigh"): Promise<{
   const params: Record<string, string | number | boolean> = { id, level, unblock: "true" };
   // 杜比全景声需要 os=pc
   if (level === "dolby") params.os = "pc";
-  log.info(TAG, "songUrlV1()", { id, level });
+  log.info("netease-api-music", "→ songUrlV1()", { id, level });
   const r = await apiGet("/song/url/v1", params);
-  log.info(TAG, "songUrlV1 result", {
+  log.info("netease-api-music", "← songUrlV1 result", {
     code: r.code, count: r.data?.length || 0,
     hasUrl: !!r.data?.[0]?.url,
     br: r.data?.[0]?.br,
@@ -375,9 +378,9 @@ export async function songDetail(ids: number[]): Promise<{
   code: number;
   songs: NeteaseSong[];
 }> {
-  log.info(TAG, "songDetail()", { ids });
+  log.info("netease-api-music", "→ songDetail()", { ids });
   const r = await apiGet("/song/detail", { ids: ids.join(",") });
-  log.info(TAG, "songDetail result", { code: r.code, count: r.songs?.length || 0 });
+  log.info("netease-api-music", "← songDetail result", { code: r.code, count: r.songs?.length || 0 });
   return r;
 }
 
@@ -387,9 +390,9 @@ export async function lyric(id: number): Promise<{
   lrc?: { lyric: string };
   tlyric?: { lyric: string };
 }> {
-  log.info(TAG, "lyric()", { id });
+  log.info("netease-api-lrc", "→ lyric()", { id });
   const r = await apiGet("/lyric", { id });
-  log.info(TAG, "lyric result", {
+  log.info("netease-api-lrc", "← lyric result", {
     code: r.code, hasLrc: !!r.lrc?.lyric, hasTlyric: !!r.tlyric?.lyric,
     lrcLen: r.lrc?.lyric?.length || 0, tlyricLen: r.tlyric?.lyric?.length || 0,
   });
@@ -406,9 +409,9 @@ export async function lyricNew(id: number): Promise<{
   yrc?: { lyric: string; version?: string };
   romalrc?: { lyric: string };
 }> {
-  log.info(TAG, "lyricNew()", { id });
+  log.info("netease-api-lrc", "→ lyricNew()", { id });
   const r = await apiGet("/lyric/new", { id });
-  log.info(TAG, "lyricNew result", {
+  log.info("netease-api-lrc", "← lyricNew result", {
     code: r.code,
     hasLrc: !!r.lrc?.lyric, hasTlyric: !!r.tlyric?.lyric,
     hasYrc: !!r.yrc?.lyric, hasRomalrc: !!r.romalrc?.lyric,
@@ -535,13 +538,29 @@ export async function searchSuggest(keywords: string, type: "mobile" | "pc" = "m
     album?: { id: number; name: string }[];
   };
 }> {
-  log.info(TAG, "searchSuggest()", { keywords, type });
+  log.info("netease-api-search", "→ searchSuggest()", { keywords, type });
   const r = await apiGet("/search/suggest", { keywords, type });
-  log.info(TAG, "searchSuggest result", {
+  // 详细记录搜索结果原始结构
+  const resultKeys = r.result ? Object.keys(r.result) : [];
+  const firstSong = r.result?.songs?.[0];
+  log.info("netease-api-search", "← searchSuggest result", {
     code: r.code,
+    resultKeys,
     songsCount: r.result?.songs?.length || 0,
     artistsCount: r.result?.artists?.length || 0,
     playlistsCount: r.result?.playlists?.length || 0,
+    firstSongKeys: firstSong ? Object.keys(firstSong) : [],
+    firstSongPreview: firstSong ? {
+      id: firstSong.id,
+      name: firstSong.name,
+      hasAr: !!firstSong.ar,
+      hasArtists: !!firstSong.artists,
+      hasAl: !!firstSong.al,
+      hasAlbum: !!firstSong.album,
+      alPicUrl: firstSong.al?.picUrl || firstSong.album?.picUrl,
+      dt: firstSong.dt,
+      duration: firstSong.duration,
+    } : null,
   });
   return r;
 }
@@ -653,20 +672,29 @@ export async function songLikeCheck(ids: number[]): Promise<{
 
 // ===== 工具函数 =====
 
-/** 把网易云歌曲对象转成播放器内部的 Song 格式 */
+/** 把网易云歌曲对象转成播放器内部的 Song 格式
+ *  兼容不同接口返回的字段差异：
+ *  - playlistTrackAll / recommendSongs: ar, al, dt
+ *  - search/suggest (type=mobile): 可能嵌套在 song 字段中，或直接返回
+ *  - songDetail: ar, al, dt
+ */
 export function neteaseSongToSong(s: NeteaseSong): import("@/types").Song {
-  const artists = s.ar || s.artists || [];
-  const album = s.al || s.album;
-  const durationSec = ((s.dt || s.duration || 0) / 1000);
+  // 处理嵌套 song 对象（search/suggest 某些情况）
+  const raw = (s.song && s.song.id) ? s.song : s;
+  const artists = raw.ar || raw.artists || [];
+  const album = raw.al || raw.album;
+  const durationSec = ((raw.dt || raw.duration || 0) / 1000);
+  // 封面：优先 album.picUrl，回退到直接 picUrl
+  const picUrl = album?.picUrl || raw.picUrl || "";
   return {
-    id: `ne_${s.id}`,
-    name: s.name,
+    id: `ne_${raw.id}`,
+    name: raw.name,
     artist: artists.map((a) => a.name).join(", ") || "未知艺术家",
-    pic: album?.picUrl || "",
+    pic: picUrl,
     url: "",
     lrc: "",
     duration: durationSec,
     source: "netease",
-    neteaseId: s.id,
+    neteaseId: raw.id,
   } as any;
 }
