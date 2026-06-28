@@ -12,8 +12,7 @@
 import { log } from "@/composables/logger";
 
 // 请填写实际的网易云音乐 API 地址（自建或部署的 api-enhanced 服务）
-// 示例：const API_BASE = "https://your-api-domain.com";
-const API_BASE = "";
+const API_BASE = "https://musicapi.mingqwq.top";
 const COOKIE_KEY = "netease-cookie";
 const TAG = "netease-api";
 

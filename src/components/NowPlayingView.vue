@@ -315,8 +315,7 @@ interface ParsedLyric {
  * Parse a single raw lyric line. If the line ends with (xxx) or （xxx）
  * AND the content inside is primarily non-CJK (foreign text), treat it as
  * a translation. Chinese lyrics often use () for supplementary lyrics,
- * so we extract those as a separate "subText" that will be displayed
- * on a new line below the main lyric.
+ * so we keep the brackets inline (no extraction) to avoid breaking the line.
  */
 function parseLyricLine(raw: string): { text: string; translation?: string; subText?: string } {
   const t = raw.trim();
@@ -329,8 +328,8 @@ function parseLyricLine(raw: string): { text: string; translation?: string; subT
       // 完全无CJK → 翻译
       return { text: mainText, translation: inside };
     } else {
-      // 含任何CJK → 补充歌词，换行显示
-      return { text: mainText, subText: inside };
+      // 含CJK → 中文歌曲的补充歌词，保持原样不拆分
+      return { text: t };
     }
   }
   return { text: t };
@@ -471,6 +470,21 @@ const lyricWrapRef = ref<HTMLDivElement | null>(null);
 const lyricContainerRef = ref<HTMLDivElement | null>(null);
 const lineRefs = ref<(HTMLDivElement | null)[]>([]);
 
+// 用户滚轮滚动偏移（px），2秒无操作后归零自动跟随
+const userScrollY = ref(0);
+let userScrollTimer: ReturnType<typeof setTimeout> | null = null;
+function onLyricWheel(e: WheelEvent) {
+  e.preventDefault();
+  // 每次滚轮滚动一定像素（根据 deltaY 调整）
+  userScrollY.value += e.deltaY;
+  // 重置定时器：2秒后归零，自动滚动回当前播放歌词
+  if (userScrollTimer) clearTimeout(userScrollTimer);
+  userScrollTimer = setTimeout(() => {
+    userScrollY.value = 0;
+    userScrollTimer = null;
+  }, 2000);
+}
+
 // Measured line heights (updated via ResizeObserver + on lyrics change)
 const measuredHeights = ref<number[]>([]);
 let lineHeightRAF = 0;
@@ -521,7 +535,7 @@ onMounted(() => {
   if (lyricWrapRef.value) lineRO.observe(lyricWrapRef.value);
   measureLineHeights();
 });
-onUnmounted(() => { lineRO?.disconnect(); if (lineHeightRAF) cancelAnimationFrame(lineHeightRAF); });
+onUnmounted(() => { lineRO?.disconnect(); if (lineHeightRAF) cancelAnimationFrame(lineHeightRAF); if (userScrollTimer) clearTimeout(userScrollTimer); });
 
 // Each line's distance (in number of lines) from active, with interlude gaps collapsed.
 function lineDistance(idx: number): number {
@@ -805,6 +819,9 @@ const lyricFontStack = computed(() => {
 const lyricContainerStyle = computed(() => ({
   "--lyric-font": lyricFontStack.value,
   "--timing": transitionTiming.value,
+  // 用户滚轮偏移：整体上下移动歌词容器
+  transform: `translateY(${userScrollY.value}px)`,
+  transition: userScrollTimer ? "none" : "transform 0.4s ease-out",
 } as Record<string, string>));
 
 // ----- Play mode (shared with PlayerBar) -----
@@ -1078,7 +1095,7 @@ const queueList = computed(() => store.queue);
           <Icon name="lyrics" :size="42" />
           <p>暂无歌词</p>
         </div>
-        <div v-else ref="lyricWrapRef" class="lyric-wrap nice-scroll">
+        <div v-else ref="lyricWrapRef" class="lyric-wrap nice-scroll" @wheel="onLyricWheel">
           <div
             ref="lyricContainerRef"
             class="lyric-container"
