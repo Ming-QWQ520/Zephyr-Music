@@ -143,7 +143,6 @@ function getPlayCount(songId: string): number {
 // 右键菜单
 const contextMenu = ref<{ visible: boolean; x: number; y: number; song: Song | null }>({ visible: false, x: 0, y: 0, song: null });
 const ctxSongLiked = ref(false);  // 当前右键歌曲是否已喜欢
-const showPlaylistPicker = ref(false);  // 是否显示收藏到歌单子菜单
 const showPlayNextSub = ref(false);  // 是否显示下一首播放子菜单
 /** 当前右键的歌曲是否在歌单/喜欢音乐视图中（可删除） */
 const ctxCanRemoveFromPlaylist = computed(() => {
@@ -155,7 +154,6 @@ const ctxCanRemoveFromPlaylist = computed(() => {
 function onContextMenu(e: MouseEvent, song: Song) {
   e.preventDefault();
   contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, song };
-  showPlaylistPicker.value = false;
   showPlayNextSub.value = false;
   // 查询喜欢状态
   if (song.source === "netease" && song.neteaseId) {
@@ -164,7 +162,7 @@ function onContextMenu(e: MouseEvent, song: Song) {
     ctxSongLiked.value = false;
   }
 }
-function closeContextMenu() { contextMenu.value.visible = false; showPlaylistPicker.value = false; showPlayNextSub.value = false; }
+function closeContextMenu() { contextMenu.value.visible = false; showPlayNextSub.value = false; }
 function ctxPlay() { if (contextMenu.value.song) store.playNow(contextMenu.value.song); closeContextMenu(); }
 function ctxPlayNext() { if (contextMenu.value.song) store.playNext(contextMenu.value.song); closeContextMenu(); }
 function ctxPlayLast() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
@@ -204,18 +202,12 @@ async function ctxToggleLike() {
   closeContextMenu();
 }
 
-// 收藏到歌单
-function ctxShowPlaylistPicker() { showPlaylistPicker.value = true; }
-async function ctxAddToPlaylist(pl: NeteasePlaylist) {
+// 添加到歌单：右键菜单点击后弹出对话框
+function ctxOpenAddToPlaylistDialog() {
   const song = contextMenu.value.song;
-  if (!song || song.source !== "netease" || !song.neteaseId) return;
-  try {
-    await playlistTracks("add", pl.id, song.neteaseId);
-    log.info("netease-view", "added to playlist", { songId: song.neteaseId, playlistId: pl.id, playlistName: pl.name });
-  } catch (e) {
-    log.warn("netease-view", "add to playlist failed", { error: String(e) });
-  }
+  if (!song || song.source !== "netease") return;
   closeContextMenu();
+  openAddToPlaylistDialog(song);
 }
 
 // 添加到歌单对话框
@@ -370,24 +362,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <img v-else src="/icons/not_like.svg" alt="not liked" class="ctx-like-icon" />
           <span>{{ ctxSongLiked ? '取消喜欢' : '喜欢' }}</span>
         </button>
-        <!-- 收藏到歌单 -->
-        <button v-if="contextMenu.song.source === 'netease'" class="ctx-item" @click="ctxShowPlaylistPicker">
-          <Icon name="folder" :size="14" /><span>添加到歌单</span><Icon name="chevronRight" :size="12" class="ctx-arrow" />
+        <!-- 添加到歌单（弹出对话框） -->
+        <button v-if="contextMenu.song.source === 'netease'" class="ctx-item" @click="ctxOpenAddToPlaylistDialog">
+          <Icon name="folder" :size="14" /><span>添加到歌单</span>
         </button>
-        <!-- 歌单子菜单 -->
-        <div v-if="showPlaylistPicker" class="ctx-submenu" @click.stop>
-          <div class="ctx-submenu-title">选择歌单</div>
-          <div class="ctx-submenu-list nice-scroll">
-            <button v-for="pl in playlists.filter(p => p.creator?.nickname || p.id > 0)" :key="pl.id"
-              class="ctx-submenu-item" @click="ctxAddToPlaylist(pl)">
-              <div class="ctx-pl-cover">
-                <img v-if="pl.coverImgUrl" :src="pl.coverImgUrl" :alt="pl.name" referrerpolicy="no-referrer" />
-                <Icon v-else name="music" :size="12" />
-              </div>
-              <span class="truncate">{{ pl.name }}</span>
-            </button>
-          </div>
-        </div>
       </div>
     </Transition>
 
@@ -399,7 +377,6 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
             <h3>添加到歌单</h3>
             <button class="pl-dialog-close" @click="closeAddToPlaylistDialog"><Icon name="close" :size="18" /></button>
           </div>
-          <div class="pl-dialog-song truncate">「{{ addToPlaylistDialog.song?.name || '' }}」</div>
           <div class="pl-dialog-list nice-scroll">
             <button v-for="pl in playlists" :key="pl.id"
               class="pl-dialog-item" @click="confirmAddToPlaylist(pl)">
@@ -530,7 +507,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .pl-dialog-header h3 { margin: 0; font-size: 16px; font-weight: 700; }
 .pl-dialog-close { color: var(--text-tertiary); transition: color 0.15s; }
 .pl-dialog-close:hover { color: var(--text); }
-.pl-dialog-song { padding: 10px 20px; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.pl-dialog-song { display: none; }
 .pl-dialog-list { flex: 1; overflow-y: auto; padding: 8px; }
 .pl-dialog-item {
   display: flex; align-items: center; gap: 12px;
