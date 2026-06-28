@@ -118,6 +118,37 @@ onMounted(() => {
   log.init();
   log.info("app", "booted");
   checkNeLogin();
+  // 恢复上次播放的歌曲：重新获取 URL 和歌词
+  const song = store.currentSong;
+  if (song) {
+    log.info("app", "restoring last song", { name: song.name, hasUrl: !!song.url, hasLrc: !!song.lrc });
+    if (song.source === "netease" && song.neteaseId) {
+      // 清除缓存的 URL 和歌词（URL 可能过期，yrcText/tlyricText 未持久化）
+      // 强制重新获取，确保逐字歌词和翻译完整
+      song.url = "";
+      song.lrc = "";
+      (song as any).yrcText = "";
+      (song as any).tlyricText = "";
+      // 同步清除队列中该歌曲的缓存
+      const idx = store.queue.findIndex(s => s.id === song.id);
+      if (idx >= 0) {
+        store.queue[idx].url = "";
+        store.queue[idx].lrc = "";
+        (store.queue[idx] as any).yrcText = "";
+        (store.queue[idx] as any).tlyricText = "";
+      }
+      // 并行获取 URL 和歌词（不阻塞，后台加载）
+      const urlP = store._ensureNeteaseUrl(song);
+      const lrcP = store._ensureNeteaseLyrics(song).then(() => {
+        if (store.currentSong?.id === song.id) store.loadLyrics(song);
+      });
+      store.lyrics = []; // 清空，等歌词加载完显示
+      void urlP; void lrcP;
+    } else {
+      // 本地歌曲：直接加载歌词
+      if (song.lrc) store.loadLyrics(song);
+    }
+  }
   // 定期保存会话（每 10 秒）
   sessionTimer = setInterval(() => store.saveSession(), 10000);
   // 页面关闭前保存
