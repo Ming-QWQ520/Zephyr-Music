@@ -228,10 +228,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         <button class="ctrl-btn vol-icon" :title="store.muted || store.volume === 0 ? '取消静音' : '静音'" @click.stop="toggleMute">
           <Icon :name="store.muted || store.volume === 0 ? 'volumeMute' : store.volume < 0.4 ? 'volumeLow' : 'volume'" :size="18" />
         </button>
-        <!-- 音量滑块（hover 时从上方弹出） -->
+        <!-- 音量滑块（hover 时从上方竖向弹出） -->
         <Transition name="vol-drop">
           <div v-show="volHover" class="vol-popup">
-            <Slider class="volume" :model-value="volumeFrac" :format="() => ''" :always-show-on-hover="false" :height="3" @change="onVolume" />
+            <Slider class="volume" :model-value="volumeFrac" :format="() => ''" :always-show-on-hover="false" :height="4" vertical @change="onVolume" />
           </div>
         </Transition>
       </div>
@@ -321,7 +321,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 /* 音量区域 */
 .vol-wrap { position: relative; display: flex; align-items: center; }
-/* 音量滑块从上方弹出（边框细薄） */
+/* 音量滑块从上方竖向弹出 */
 .vol-popup {
   position: absolute;
   bottom: calc(100% + 6px);
@@ -330,11 +330,13 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   background: var(--bg-elev-3);
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 8px;
-  padding: 10px 8px;
+  padding: 12px 8px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   z-index: 50;
+  display: flex;
+  justify-content: center;
 }
-.volume { width: 100px; }
+.volume { width: 14px; height: 100px; }
 .vol-icon { width: 28px; height: 28px; }
 .vol-drop-enter-active, .vol-drop-leave-active { transition: opacity 0.15s, transform 0.15s; }
 .vol-drop-enter-from, .vol-drop-leave-to { opacity: 0; transform: translateX(50%) translateY(8px); }
@@ -345,7 +347,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   .right-block { justify-content: flex-end; }
   .progress-row .time { display: none; }
   .controls { gap: 8px; }
-  .volume { width: 60px; }
+  .volume { width: 14px; height: 80px; }
 }
 @media (max-width: 560px) {
   .meta .artist { display: none; }
