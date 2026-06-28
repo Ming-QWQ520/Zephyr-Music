@@ -9,6 +9,8 @@ import {
   type NeteasePlaylist,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
+import { useToast } from "@/composables/useToast";
+const toast = useToast();
 import type { Song } from "@/types";
 import Icon from "@/components/Icon.vue";
 import { formatTime } from "@/composables/utils";
@@ -168,21 +170,45 @@ function ctxPlayNext() { if (contextMenu.value.song) store.playNext(contextMenu.
 function ctxPlayLast() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
 function ctxAddToQueue() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
 
-// 从当前歌单删除歌曲
-async function ctxRemoveFromPlaylist() {
+// 从当前歌单删除歌曲（弹出确认框）
+function ctxRemoveFromPlaylist() {
   const song = contextMenu.value.song;
   const pid = selectedPlaylistId.value;
   if (!song || song.source !== "netease" || !song.neteaseId || !pid || pid <= 0) return;
+  closeContextMenu();
+  // 弹出确认框
+  confirmDialog.value = {
+    visible: true,
+    title: "移除歌曲",
+    message: `是否从歌单移除「${song.name}」？`,
+    song,
+    pid,
+  };
+}
+
+// 确认删除对话框
+const confirmDialog = ref<{ visible: boolean; title: string; message: string; song: Song | null; pid: number | null }>({
+  visible: false, title: "", message: "", song: null, pid: null,
+});
+function closeConfirmDialog() { confirmDialog.value.visible = false; }
+async function confirmRemoveFromPlaylist() {
+  const song = confirmDialog.value.song;
+  const pid = confirmDialog.value.pid;
+  if (!song || !song.neteaseId || !pid) { closeConfirmDialog(); return; }
+  closeConfirmDialog();
+  // 后台执行删除
   try {
     await playlistTracks("del", pid, song.neteaseId);
     log.info("netease-view", "removed from playlist", { songId: song.neteaseId, playlistId: pid });
     // 从当前列表移除
     const idx = currentPlaylistSongs.value.findIndex(s => s.id === song.id);
     if (idx >= 0) currentPlaylistSongs.value.splice(idx, 1);
+    // 右下角提示
+    toast.success("已从歌单移除", song.name);
   } catch (e) {
     log.warn("netease-view", "remove from playlist failed", { error: String(e) });
+    toast.error("移除失败", "请稍后重试");
   }
-  closeContextMenu();
 }
 
 // 喜欢/取消喜欢
@@ -211,31 +237,29 @@ function ctxOpenAddToPlaylistDialog() {
 }
 
 // 添加到歌单对话框
-const addToPlaylistDialog = ref<{ visible: boolean; song: Song | null; adding: boolean; addedPid: number | null }>({
-  visible: false, song: null, adding: false, addedPid: null,
+const addToPlaylistDialog = ref<{ visible: boolean; song: Song | null }>({
+  visible: false, song: null,
 });
 function openAddToPlaylistDialog(song: Song) {
   if (song.source !== "netease" || !song.neteaseId) return;
-  addToPlaylistDialog.value = { visible: true, song, adding: false, addedPid: null };
+  addToPlaylistDialog.value = { visible: true, song };
 }
 function closeAddToPlaylistDialog() {
   addToPlaylistDialog.value.visible = false;
 }
-async function confirmAddToPlaylist(pl: NeteasePlaylist) {
+// 点击歌单后：关闭对话框，后台添加，完成后 toast 提示
+function confirmAddToPlaylist(pl: NeteasePlaylist) {
   const song = addToPlaylistDialog.value.song;
-  if (!song || !song.neteaseId || addToPlaylistDialog.value.adding) return;
-  addToPlaylistDialog.value.adding = true;
-  addToPlaylistDialog.value.addedPid = null;
-  try {
-    await playlistTracks("add", pl.id, song.neteaseId);
-    addToPlaylistDialog.value.addedPid = pl.id;
-    log.info("netease-view", "added to playlist (dialog)", { songId: song.neteaseId, playlistId: pl.id, playlistName: pl.name });
-    // 1.2 秒后关闭对话框
-    setTimeout(() => { closeAddToPlaylistDialog(); }, 1200);
-  } catch (e) {
-    log.warn("netease-view", "add to playlist failed (dialog)", { error: String(e) });
-    addToPlaylistDialog.value.adding = false;
-  }
+  if (!song || !song.neteaseId) return;
+  closeAddToPlaylistDialog();
+  // 后台执行添加
+  playlistTracks("add", pl.id, song.neteaseId).then(() => {
+    log.info("netease-view", "added to playlist", { songId: song.neteaseId, playlistId: pl.id, playlistName: pl.name });
+    toast.success("添加成功", `已添加到「${pl.name}」`, 2000);
+  }).catch((e) => {
+    log.warn("netease-view", "add to playlist failed", { error: String(e) });
+    toast.error("添加失败", "请稍后重试");
+  });
 }
 function onDocClick() { closeContextMenu(); }
 
@@ -388,10 +412,23 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
                 <div class="pl-dialog-name truncate">{{ pl.name }}</div>
                 <div class="pl-dialog-count">{{ pl.trackCount }} 首</div>
               </div>
-              <Icon v-if="addToPlaylistDialog.addedPid === pl.id" name="check" :size="16" class="pl-dialog-added" />
             </button>
           </div>
-          <div v-if="addToPlaylistDialog.adding" class="pl-dialog-loading">添加中...</div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 确认删除对话框 -->
+    <Transition name="pl-dialog-fade">
+      <div v-if="confirmDialog.visible" class="pl-dialog-overlay" @click="closeConfirmDialog">
+        <div class="confirm-dialog" @click.stop>
+          <div class="confirm-dialog-icon"><Icon name="info" :size="24" /></div>
+          <h3 class="confirm-dialog-title">{{ confirmDialog.title }}</h3>
+          <p class="confirm-dialog-message">{{ confirmDialog.message }}</p>
+          <div class="confirm-dialog-actions">
+            <button class="confirm-btn-cancel" @click="closeConfirmDialog">取消</button>
+            <button class="confirm-btn-ok" @click="confirmRemoveFromPlaylist">移除</button>
+          </div>
         </div>
       </div>
     </Transition>
@@ -528,4 +565,27 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .pl-dialog-loading { padding: 12px 20px; text-align: center; font-size: 12px; color: var(--text-tertiary); border-top: 1px solid var(--border); }
 .pl-dialog-fade-enter-active, .pl-dialog-fade-leave-active { transition: opacity 0.15s; }
 .pl-dialog-fade-enter-from, .pl-dialog-fade-leave-to { opacity: 0; }
+
+/* 确认删除对话框 */
+.confirm-dialog {
+  width: 340px; max-width: 90vw;
+  background: var(--bg-elev-3); border: 1px solid var(--border-strong);
+  border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  padding: 24px; text-align: center;
+}
+.confirm-dialog-icon { color: #faad14; margin-bottom: 12px; display: flex; justify-content: center; }
+.confirm-dialog-title { margin: 0 0 8px; font-size: 16px; font-weight: 700; }
+.confirm-dialog-message { margin: 0 0 20px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; }
+.confirm-dialog-actions { display: flex; gap: 10px; justify-content: center; }
+.confirm-btn-cancel {
+  padding: 8px 20px; border-radius: 8px; font-size: 13px;
+  color: var(--text-secondary); border: 1px solid var(--border);
+  transition: all 0.15s;
+}
+.confirm-btn-cancel:hover { color: var(--text); background: var(--bg-hover); }
+.confirm-btn-ok {
+  padding: 8px 20px; border-radius: 8px; font-size: 13px;
+  color: #fff; background: #ff4d4f; transition: all 0.15s;
+}
+.confirm-btn-ok:hover { background: #ff7875; }
 </style>

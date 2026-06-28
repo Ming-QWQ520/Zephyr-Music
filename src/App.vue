@@ -12,6 +12,7 @@ import LibraryView from "@/components/LibraryView.vue";
 import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
+import ToastContainer from "@/components/ToastContainer.vue";
 import Icon from "@/components/Icon.vue";
 import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser } from "@/api/netease";
 
@@ -229,6 +230,9 @@ onUnmounted(() => {
 
     <!-- Settings (modal/fullscreen on home page) -->
     <SettingsPanel :visible="showSettings" mode="modal" @close="showSettings = false" />
+
+    <!-- Toast 通知容器（右下角） -->
+    <ToastContainer />
   </div>
 </template>
 
