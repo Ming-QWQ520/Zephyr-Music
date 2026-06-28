@@ -70,16 +70,27 @@ export const usePlayerStore = defineStore("player", {
     /** 设置当前播放队列来源的歌单 ID（用于听歌打卡 sourceid） */
     setSourcePlaylistId(id: number | null) { this.sourcePlaylistId = id; },
 
-    /** 播放一首歌。如果是网易云歌曲（source=netease），动态获取 URL 和歌词。 */
+    /** 播放一首歌。如果是网易云歌曲（source=netease），动态获取 URL 和歌词。
+     *  URL 和歌词并行获取，不等待歌词就开始播放（歌词后台加载，加载完自动显示）。 */
     async playNow(song: Song) {
-      // 网易云歌曲：动态获取播放 URL
-      if (song.source === "netease" && song.neteaseId && !song.url) {
-        await this._ensureNeteaseUrl(song);
+      // 网易云歌曲：并行获取 URL 和歌词（不阻塞播放）
+      if (song.source === "netease" && song.neteaseId) {
+        const urlPromise = !song.url ? this._ensureNeteaseUrl(song) : Promise.resolve();
+        const lrcPromise = !song.lrc ? this._ensureNeteaseLyrics(song).then(() => {
+          // 歌词获取完成后，如果还是当前歌曲，重新加载歌词
+          if (this.currentSong?.id === song.id) this.loadLyrics(song);
+        }) : Promise.resolve();
+        await urlPromise; // 只等待 URL，不等待歌词
+        // 歌词在后台继续加载（lrcPromise 不 await）
+        void lrcPromise;
       }
       const idx = this.queue.findIndex(s => s.id === song.id);
       if (idx >= 0) this.currentIndex = idx;
       else { this.queue.push(song); this.currentIndex = this.queue.length - 1; }
-      this.isPlaying = true; this.pushHistory(song); this.loadLyrics(song);
+      this.isPlaying = true; this.pushHistory(song);
+      // 立即加载已有歌词（如果之前已缓存）
+      if (song.lrc) this.loadLyrics(song);
+      else this.lyrics = [];
     },
 
     /** 播放歌单。网易云歌曲需要逐个获取 URL（首次播放时懒加载）。 */
@@ -89,10 +100,18 @@ export const usePlayerStore = defineStore("player", {
       this.isPlaying = true;
       const s = this.currentSong;
       if (s) {
-        if (s.source === "netease" && s.neteaseId && !s.url) {
-          await this._ensureNeteaseUrl(s);
+        if (s.source === "netease" && s.neteaseId) {
+          // 并行获取 URL 和歌词，只等待 URL
+          const urlPromise = !s.url ? this._ensureNeteaseUrl(s) : Promise.resolve();
+          const lrcPromise = !s.lrc ? this._ensureNeteaseLyrics(s).then(() => {
+            if (this.currentSong?.id === s.id) this.loadLyrics(s);
+          }) : Promise.resolve();
+          await urlPromise;
+          void lrcPromise;
         }
-        this.pushHistory(s); this.loadLyrics(s);
+        this.pushHistory(s);
+        if (s.lrc) this.loadLyrics(s);
+        else this.lyrics = [];
       }
     },
 
@@ -127,7 +146,7 @@ export const usePlayerStore = defineStore("player", {
       let tlyric = "";
       try {
         const newRes = await lyricNew(song.neteaseId);
-        log.info("lyrics", "lyricNew response", { keys: Object.keys(newRes), hasYrc: !!newRes.yrc?.lyric, songId: song.neteaseId, songName: song.name });
+        log.info("lyrics", "lyricNew response", { keys: Object.keys(newRes), hasYrc: !!newRes.yrc?.lyric, hasLrc: !!newRes.lrc?.lyric, songId: song.neteaseId, songName: song.name });
         if (newRes.yrc?.lyric) {
           const parsed = parseYrc(newRes.yrc.lyric);
           log.info("lyrics", "yrc parsed", { lines: parsed.length, firstLine: parsed[0]?.text || "" });
@@ -146,13 +165,19 @@ export const usePlayerStore = defineStore("player", {
             log.info("lyrics", "using yrc (逐字歌词)", { lrcLen: lrcText.length });
           }
         }
+        // /lyric/new 同时返回 lrc 和 tlyric，无需再调用 /lyric
+        if (!lrcText && newRes.lrc?.lyric) {
+          lrcText = newRes.lrc.lyric;
+          log.info("lyrics", "using lrc from /lyric/new", { lrcLen: lrcText.length });
+        }
         if (newRes.tlyric?.lyric) {
           tlyric = newRes.tlyric.lyric;
           log.info("lyrics", "got tlyric", { tlyricLen: tlyric.length });
         }
       } catch (e) { log.warn("lyrics", "lyricNew error", { error: String(e) }); }
+      // 只有 /lyric/new 完全失败时才回退到 /lyric
       if (!lrcText) {
-        log.info("lyrics", "no yrc, fallback to /lyric", { songId: song.neteaseId });
+        log.info("lyrics", "lyricNew failed or empty, fallback to /lyric", { songId: song.neteaseId });
         try {
           const lrcRes = await lyric(song.neteaseId);
           if (lrcRes.lrc?.lyric) {
@@ -203,8 +228,17 @@ export const usePlayerStore = defineStore("player", {
       this.isPlaying = true;
       const s = this.currentSong;
       if (s) {
-        if (s.source === "netease" && s.neteaseId && !s.url) await this._ensureNeteaseUrl(s);
-        this.loadLyrics(s);
+        if (s.source === "netease" && s.neteaseId) {
+          // 并行获取 URL 和歌词
+          const urlP = !s.url ? this._ensureNeteaseUrl(s) : Promise.resolve();
+          const lrcP = !s.lrc ? this._ensureNeteaseLyrics(s).then(() => {
+            if (this.currentSong?.id === s.id) this.loadLyrics(s);
+          }) : Promise.resolve();
+          await urlP;
+          void lrcP;
+        }
+        if (s.lrc) this.loadLyrics(s);
+        else this.lyrics = [];
       }
     },
     async prev() {
@@ -216,8 +250,17 @@ export const usePlayerStore = defineStore("player", {
       this.isPlaying = true;
       const s = this.currentSong;
       if (s) {
-        if (s.source === "netease" && s.neteaseId && !s.url) await this._ensureNeteaseUrl(s);
-        this.loadLyrics(s);
+        if (s.source === "netease" && s.neteaseId) {
+          // 并行获取 URL 和歌词
+          const urlP = !s.url ? this._ensureNeteaseUrl(s) : Promise.resolve();
+          const lrcP = !s.lrc ? this._ensureNeteaseLyrics(s).then(() => {
+            if (this.currentSong?.id === s.id) this.loadLyrics(s);
+          }) : Promise.resolve();
+          await urlP;
+          void lrcP;
+        }
+        if (s.lrc) this.loadLyrics(s);
+        else this.lyrics = [];
       }
     },
     seek(t: number) { this.currentTime = t; },
