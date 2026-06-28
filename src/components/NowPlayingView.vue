@@ -475,8 +475,9 @@ const userScrollY = ref(0);
 let userScrollTimer: ReturnType<typeof setTimeout> | null = null;
 function onLyricWheel(e: WheelEvent) {
   e.preventDefault();
-  // 每次滚轮滚动一定像素（根据 deltaY 调整）
-  userScrollY.value += e.deltaY;
+  // 标准滚动方向：滚轮向下( deltaY>0 )→ 内容上移查看下方(偏移减小)
+  //               滚轮向上( deltaY<0 )→ 内容下移查看上方(偏移增大)
+  userScrollY.value -= e.deltaY;
   // 重置定时器：2秒后归零，自动滚动回当前播放歌词
   if (userScrollTimer) clearTimeout(userScrollTimer);
   userScrollTimer = setTimeout(() => {
@@ -821,7 +822,11 @@ const lyricContainerStyle = computed(() => ({
   "--timing": transitionTiming.value,
   // 用户滚轮偏移：整体上下移动歌词容器
   transform: `translateY(${userScrollY.value}px)`,
-  transition: userScrollTimer ? "none" : "transform 0.4s ease-out",
+  // 平滑滚动：开启时滚动有过渡效果（默认关闭，即时响应）
+  // 自动回正时始终有过渡（0.4s ease-out）
+  transition: settings.smoothLyricScroll
+    ? "transform 0.15s ease-out"
+    : (userScrollTimer ? "none" : "transform 0.4s ease-out"),
 } as Record<string, string>));
 
 // ----- Play mode (shared with PlayerBar) -----

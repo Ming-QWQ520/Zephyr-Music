@@ -62,6 +62,7 @@ export interface PlayerSettings {
   // Misc
   hidePlayerControls: boolean;
   autoHideMiniInfo: boolean;
+  smoothLyricScroll: boolean; // 歌词平滑滚动（滚轮滑动时有过渡效果）
 
   // Experimental
   gpuAcceleration: boolean;
@@ -118,6 +119,7 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
 
   hidePlayerControls: false,
   autoHideMiniInfo: true,
+  smoothLyricScroll: false,
 
   gpuAcceleration: true,
   debugLog: false,
@@ -570,6 +572,10 @@ const APP_VERSION = "1.0.0";
               <div class="row toggle">
                 <div class="label">自动隐藏迷你信息</div>
                 <button class="switch" :class="{ on: settings.autoHideMiniInfo }" @click="settings.autoHideMiniInfo = !settings.autoHideMiniInfo" />
+              </div>
+              <div class="row toggle">
+                <div class="label">平滑滚动歌词</div>
+                <button class="switch" :class="{ on: settings.smoothLyricScroll }" @click="settings.smoothLyricScroll = !settings.smoothLyricScroll" />
               </div>
             </section>
 
