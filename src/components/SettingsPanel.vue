@@ -631,16 +631,34 @@ const APP_VERSION = "1.0.0";
                 <div class="about-info">
                   <div class="about-name">Zephyr · 音乐</div>
                   <div class="about-version">v{{ APP_VERSION }}</div>
-                  <p class="about-desc">
-                    受 Apple Music 与 Refined Now Playing 启发的桌面音乐播放器。
-                    Tauri + Vue 3 + Rodio 后端。
-                  </p>
-                  <div class="about-meta">
-                    <span>© 2025 Zephyr</span>
-                    <a href="#" @click.prevent>GitHub</a>
+                </div>
+              </div>
+
+              <!-- 链接列表 -->
+              <div class="about-links">
+                <a class="about-link-item" href="https://github.com/Ming-QWQ520/Zephyr-Music/" target="_blank" rel="noopener">
+                  <div class="about-link-icon"><Icon name="info" :size="16" /></div>
+                  <div class="about-link-content">
+                    <div class="about-link-title">GitHub 仓库</div>
+                    <div class="about-link-url">github.com/Ming-QWQ520/Zephyr-Music</div>
+                  </div>
+                </a>
+                <div class="about-link-item">
+                  <div class="about-link-icon"><Icon name="info" :size="16" /></div>
+                  <div class="about-link-content">
+                    <div class="about-link-title">开源协议</div>
+                    <div class="about-link-url">AGPL-3.0</div>
+                  </div>
+                </div>
+                <div class="about-link-item">
+                  <div class="about-link-icon"><Icon name="info" :size="16" /></div>
+                  <div class="about-link-content">
+                    <div class="about-link-title">作者主页</div>
+                    <div class="about-link-url">抖音号: czm529797</div>
                   </div>
                 </div>
               </div>
+
               <button class="reset-btn" @click="resetAll">
                 <Icon name="trash" :size="14" />
                 <span>恢复默认设置</span>
@@ -990,6 +1008,36 @@ const APP_VERSION = "1.0.0";
   color: var(--accent);
   text-decoration: none;
 }
+/* 关于页链接列表 */
+.about-links {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.about-link-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--bg-elev-3);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text);
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.about-link-item:hover { background: var(--bg-hover); }
+.about-link-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  background: var(--bg-elev-1);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent); flex-shrink: 0;
+}
+.about-link-content { flex: 1; min-width: 0; }
+.about-link-title { font-size: 13px; font-weight: 600; color: var(--text); }
+.about-link-url { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+a.about-link-item .about-link-url { color: var(--accent); opacity: 0.8; }
 
 .reset-btn {
   display: inline-flex;
