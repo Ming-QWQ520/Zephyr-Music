@@ -5,6 +5,7 @@ import {
   playlistTrackAll, recommendSongs, userRecord,
   getCachedUser, getCachedPlaylists,
   neteaseSongToSong, getCookie, _cachedUser,
+  likeSong, playlistTracks, getCachedLikeList, addLikeCache, removeLikeCache,
   type NeteasePlaylist,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
@@ -141,11 +142,54 @@ function getPlayCount(songId: string): number {
 
 // 右键菜单
 const contextMenu = ref<{ visible: boolean; x: number; y: number; song: Song | null }>({ visible: false, x: 0, y: 0, song: null });
-function onContextMenu(e: MouseEvent, song: Song) { e.preventDefault(); contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, song }; }
-function closeContextMenu() { contextMenu.value.visible = false; }
+const ctxSongLiked = ref(false);  // 当前右键歌曲是否已喜欢
+const showPlaylistPicker = ref(false);  // 是否显示收藏到歌单子菜单
+function onContextMenu(e: MouseEvent, song: Song) {
+  e.preventDefault();
+  contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, song };
+  showPlaylistPicker.value = false;
+  // 查询喜欢状态
+  if (song.source === "netease" && song.neteaseId) {
+    getCachedLikeList().then(set => { ctxSongLiked.value = set.has(song.neteaseId!); }).catch(() => {});
+  } else {
+    ctxSongLiked.value = false;
+  }
+}
+function closeContextMenu() { contextMenu.value.visible = false; showPlaylistPicker.value = false; }
 function ctxPlay() { if (contextMenu.value.song) store.playNow(contextMenu.value.song); closeContextMenu(); }
 function ctxPlayNext() { if (contextMenu.value.song) store.playNextSong(contextMenu.value.song); closeContextMenu(); }
 function ctxAddToQueue() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
+
+// 喜欢/取消喜欢
+async function ctxToggleLike() {
+  const song = contextMenu.value.song;
+  if (!song || song.source !== "netease" || !song.neteaseId) return;
+  try {
+    const newLike = !ctxSongLiked.value;
+    await likeSong(song.neteaseId, newLike);
+    ctxSongLiked.value = newLike;
+    if (newLike) addLikeCache(song.neteaseId);
+    else removeLikeCache(song.neteaseId);
+    log.info("netease-view", "ctx like toggled", { songId: song.neteaseId, liked: newLike });
+  } catch (e) {
+    log.warn("netease-view", "ctx like failed", { error: String(e) });
+  }
+  closeContextMenu();
+}
+
+// 收藏到歌单
+function ctxShowPlaylistPicker() { showPlaylistPicker.value = true; }
+async function ctxAddToPlaylist(pl: NeteasePlaylist) {
+  const song = contextMenu.value.song;
+  if (!song || song.source !== "netease" || !song.neteaseId) return;
+  try {
+    await playlistTracks("add", pl.id, song.neteaseId);
+    log.info("netease-view", "added to playlist", { songId: song.neteaseId, playlistId: pl.id, playlistName: pl.name });
+  } catch (e) {
+    log.warn("netease-view", "add to playlist failed", { error: String(e) });
+  }
+  closeContextMenu();
+}
 function onDocClick() { closeContextMenu(); }
 
 onMounted(() => { document.addEventListener("click", onDocClick); loadData(); });
@@ -242,6 +286,31 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         <button class="ctx-item" @click="ctxPlay"><Icon name="play" :size="14" /><span>播放</span></button>
         <button class="ctx-item" @click="ctxPlayNext"><Icon name="next" :size="14" /><span>下一首播放</span></button>
         <button class="ctx-item" @click="ctxAddToQueue"><Icon name="plus" :size="14" /><span>加入队列</span></button>
+        <div class="ctx-divider" />
+        <!-- 喜欢按钮 -->
+        <button v-if="contextMenu.song.source === 'netease'" class="ctx-item" @click="ctxToggleLike">
+          <img v-if="ctxSongLiked" src="/icons/like.svg" alt="liked" class="ctx-like-icon" />
+          <img v-else src="/icons/not_like.svg" alt="not liked" class="ctx-like-icon" />
+          <span>{{ ctxSongLiked ? '取消喜欢' : '喜欢' }}</span>
+        </button>
+        <!-- 收藏到歌单 -->
+        <button v-if="contextMenu.song.source === 'netease'" class="ctx-item" @click="ctxShowPlaylistPicker">
+          <Icon name="folder" :size="14" /><span>收藏到歌单</span><Icon name="chevronRight" :size="12" class="ctx-arrow" />
+        </button>
+        <!-- 歌单子菜单 -->
+        <div v-if="showPlaylistPicker" class="ctx-submenu" @click.stop>
+          <div class="ctx-submenu-title">选择歌单</div>
+          <div class="ctx-submenu-list nice-scroll">
+            <button v-for="pl in playlists.filter(p => p.creator?.nickname || p.id > 0)" :key="pl.id"
+              class="ctx-submenu-item" @click="ctxAddToPlaylist(pl)">
+              <div class="ctx-pl-cover">
+                <img v-if="pl.coverImgUrl" :src="pl.coverImgUrl" :alt="pl.name" referrerpolicy="no-referrer" />
+                <Icon v-else name="music" :size="12" />
+              </div>
+              <span class="truncate">{{ pl.name }}</span>
+            </button>
+          </div>
+        </div>
       </div>
     </Transition>
   </div>
@@ -290,9 +359,20 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .col-dur { color: var(--text-tertiary); text-align: right; font-variant-numeric: tabular-nums; }
 .col-playcount { color: var(--text-tertiary); text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }
 
-.context-menu { position: fixed; z-index: 500; min-width: 160px; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 4px; }
+.context-menu { position: fixed; z-index: 500; min-width: 180px; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 4px; }
 .ctx-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--text); text-align: left; transition: background 0.1s; }
 .ctx-item:hover { background: var(--bg-hover); color: var(--accent); }
+.ctx-item .ctx-arrow { margin-left: auto; opacity: 0.5; }
+.ctx-like-icon { width: 14px; height: 14px; flex-shrink: 0; }
+.ctx-divider { height: 1px; background: var(--border); margin: 4px 8px; }
+/* 歌单子菜单 */
+.ctx-submenu { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 4px; }
+.ctx-submenu-title { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; }
+.ctx-submenu-list { max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+.ctx-submenu-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 12px; border-radius: 6px; font-size: 12px; color: var(--text-secondary); text-align: left; transition: background 0.1s; }
+.ctx-submenu-item:hover { background: var(--bg-hover); color: var(--accent); }
+.ctx-pl-cover { width: 22px; height: 22px; border-radius: 4px; flex-shrink: 0; background: var(--bg-elev-1); overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.ctx-pl-cover img { width: 100%; height: 100%; object-fit: cover; }
 .ctx-fade-enter-active, .ctx-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
 .ctx-fade-enter-from, .ctx-fade-leave-to { opacity: 0; transform: scale(0.95); }
 </style>

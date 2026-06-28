@@ -284,6 +284,22 @@ export async function playlistTrackAll(playlistId: number, limit = 300, offset =
   return r;
 }
 
+/** 添加/删除歌曲到歌单
+ *  op: "add" 添加 / "del" 删除
+ *  pid: 歌单 ID
+ *  tracks: 歌曲 ID（多个用逗号分隔）
+ */
+export async function playlistTracks(op: "add" | "del", pid: number, tracks: number | string): Promise<{
+  code: number;
+  status?: number;
+  body?: { code?: number };
+}> {
+  log.info(TAG, "playlistTracks()", { op, pid, tracks });
+  const r = await apiGet("/playlist/tracks", { op, pid, tracks });
+  log.info(TAG, "playlistTracks result", { op, pid, code: r.code });
+  return r;
+}
+
 /** 每日推荐歌曲（需登录） */
 export async function recommendSongs(): Promise<{
   code: number;
