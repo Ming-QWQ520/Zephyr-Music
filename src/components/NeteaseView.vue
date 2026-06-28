@@ -190,6 +190,34 @@ async function ctxAddToPlaylist(pl: NeteasePlaylist) {
   }
   closeContextMenu();
 }
+
+// 添加到歌单对话框
+const addToPlaylistDialog = ref<{ visible: boolean; song: Song | null; adding: boolean; addedPid: number | null }>({
+  visible: false, song: null, adding: false, addedPid: null,
+});
+function openAddToPlaylistDialog(song: Song) {
+  if (song.source !== "netease" || !song.neteaseId) return;
+  addToPlaylistDialog.value = { visible: true, song, adding: false, addedPid: null };
+}
+function closeAddToPlaylistDialog() {
+  addToPlaylistDialog.value.visible = false;
+}
+async function confirmAddToPlaylist(pl: NeteasePlaylist) {
+  const song = addToPlaylistDialog.value.song;
+  if (!song || !song.neteaseId || addToPlaylistDialog.value.adding) return;
+  addToPlaylistDialog.value.adding = true;
+  addToPlaylistDialog.value.addedPid = null;
+  try {
+    await playlistTracks("add", pl.id, song.neteaseId);
+    addToPlaylistDialog.value.addedPid = pl.id;
+    log.info("netease-view", "added to playlist (dialog)", { songId: song.neteaseId, playlistId: pl.id, playlistName: pl.name });
+    // 1.2 秒后关闭对话框
+    setTimeout(() => { closeAddToPlaylistDialog(); }, 1200);
+  } catch (e) {
+    log.warn("netease-view", "add to playlist failed (dialog)", { error: String(e) });
+    addToPlaylistDialog.value.adding = false;
+  }
+}
 function onDocClick() { closeContextMenu(); }
 
 onMounted(() => { document.addEventListener("click", onDocClick); loadData(); });
@@ -273,7 +301,13 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
             </span>
             <span class="col-artist truncate">{{ song.artist }}</span>
             <span v-if="isRecordView" class="col-playcount">{{ getPlayCount(song.id) }} 次</span>
-            <span v-else class="col-dur">{{ song.duration ? formatTime(song.duration) : '--:--' }}</span>
+            <span v-else class="col-dur">
+              {{ song.duration ? formatTime(song.duration) : '--:--' }}
+              <!-- 添加到歌单图标（hover 显示，仅网易云歌曲） -->
+              <button v-if="song.source === 'netease'" class="row-add-pl-btn" title="添加到歌单" @click.stop="openAddToPlaylistDialog(song)">
+                <img src="/icons/add_playlist.svg" alt="add to playlist" class="row-add-pl-icon" />
+              </button>
+            </span>
           </div>
         </template>
       </div>
@@ -310,6 +344,34 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
               <span class="truncate">{{ pl.name }}</span>
             </button>
           </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 添加到歌单对话框 -->
+    <Transition name="pl-dialog-fade">
+      <div v-if="addToPlaylistDialog.visible" class="pl-dialog-overlay" @click="closeAddToPlaylistDialog">
+        <div class="pl-dialog" @click.stop>
+          <div class="pl-dialog-header">
+            <h3>添加到歌单</h3>
+            <button class="pl-dialog-close" @click="closeAddToPlaylistDialog"><Icon name="close" :size="18" /></button>
+          </div>
+          <div class="pl-dialog-song truncate">「{{ addToPlaylistDialog.song?.name || '' }}」</div>
+          <div class="pl-dialog-list nice-scroll">
+            <button v-for="pl in playlists" :key="pl.id"
+              class="pl-dialog-item" @click="confirmAddToPlaylist(pl)">
+              <div class="pl-dialog-cover">
+                <img v-if="pl.coverImgUrl" :src="pl.coverImgUrl" :alt="pl.name" referrerpolicy="no-referrer" />
+                <Icon v-else name="music" :size="16" />
+              </div>
+              <div class="pl-dialog-info">
+                <div class="pl-dialog-name truncate">{{ pl.name }}</div>
+                <div class="pl-dialog-count">{{ pl.trackCount }} 首</div>
+              </div>
+              <Icon v-if="addToPlaylistDialog.addedPid === pl.id" name="check" :size="16" class="pl-dialog-added" />
+            </button>
+          </div>
+          <div v-if="addToPlaylistDialog.adding" class="pl-dialog-loading">添加中...</div>
         </div>
       </div>
     </Transition>
@@ -375,4 +437,56 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctx-pl-cover img { width: 100%; height: 100%; object-fit: cover; }
 .ctx-fade-enter-active, .ctx-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
 .ctx-fade-enter-from, .ctx-fade-leave-to { opacity: 0; transform: scale(0.95); }
+
+/* 歌曲行添加到歌单按钮 */
+.col-dur { position: relative; display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.row-add-pl-btn {
+  width: 24px; height: 24px; border-radius: 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s, background 0.15s;
+}
+.song-trow:hover .row-add-pl-btn { opacity: 0.6; }
+.row-add-pl-btn:hover { opacity: 1 !important; background: var(--bg-hover); }
+.row-add-pl-icon { width: 14px; height: 14px; pointer-events: none; }
+
+/* 添加到歌单对话框 */
+.pl-dialog-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.5); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.pl-dialog {
+  width: 380px; max-width: 90vw; max-height: 70vh;
+  background: var(--bg-elev-3); border: 1px solid var(--border-strong);
+  border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pl-dialog-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+}
+.pl-dialog-header h3 { margin: 0; font-size: 16px; font-weight: 700; }
+.pl-dialog-close { color: var(--text-tertiary); transition: color 0.15s; }
+.pl-dialog-close:hover { color: var(--text); }
+.pl-dialog-song { padding: 10px 20px; font-size: 13px; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.pl-dialog-list { flex: 1; overflow-y: auto; padding: 8px; }
+.pl-dialog-item {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; padding: 8px 12px; border-radius: 8px;
+  text-align: left; transition: background 0.15s;
+}
+.pl-dialog-item:hover { background: var(--bg-hover); }
+.pl-dialog-cover {
+  width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0;
+  background: var(--bg-elev-1); overflow: hidden;
+  display: flex; align-items: center; justify-content: center; color: var(--text-tertiary);
+}
+.pl-dialog-cover img { width: 100%; height: 100%; object-fit: cover; }
+.pl-dialog-info { flex: 1; min-width: 0; }
+.pl-dialog-name { font-size: 13px; color: var(--text); font-weight: 500; }
+.pl-dialog-count { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
+.pl-dialog-added { color: var(--accent); flex-shrink: 0; }
+.pl-dialog-loading { padding: 12px 20px; text-align: center; font-size: 12px; color: var(--text-tertiary); border-top: 1px solid var(--border); }
+.pl-dialog-fade-enter-active, .pl-dialog-fade-leave-active { transition: opacity 0.15s; }
+.pl-dialog-fade-enter-from, .pl-dialog-fade-leave-to { opacity: 0; }
 </style>

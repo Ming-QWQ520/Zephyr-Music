@@ -61,6 +61,7 @@ const ICONS: Record<string, string> = {
   clock: `<circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2" stroke-linecap="round" stroke-linejoin="round"/>`,
   equalizer: `<path d="M6 4v8M6 16v4M12 4v3M12 11v9M18 4v9M18 17v3" stroke-linecap="round"/><circle cx="6" cy="12" r="2" /><circle cx="12" cy="8" r="2" /><circle cx="18" cy="14" r="2" />`,
   grip: `<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>`,
+  check: `<path d="m5 12 5 5L20 7" stroke-linecap="round" stroke-linejoin="round"/>`,
 };
 
 const inner = computed(() => ICONS[props.name] || "");

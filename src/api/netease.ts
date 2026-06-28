@@ -288,6 +288,7 @@ export async function playlistTrackAll(playlistId: number, limit = 300, offset =
  *  op: "add" 添加 / "del" 删除
  *  pid: 歌单 ID
  *  tracks: 歌曲 ID（多个用逗号分隔）
+ *  注：v4.29.7 后需要带 timestamp 字段，否则请求不合法
  */
 export async function playlistTracks(op: "add" | "del", pid: number, tracks: number | string): Promise<{
   code: number;
@@ -295,8 +296,8 @@ export async function playlistTracks(op: "add" | "del", pid: number, tracks: num
   body?: { code?: number };
 }> {
   log.info(TAG, "playlistTracks()", { op, pid, tracks });
-  const r = await apiGet("/playlist/tracks", { op, pid, tracks });
-  log.info(TAG, "playlistTracks result", { op, pid, code: r.code });
+  const r = await apiGet("/playlist/tracks", { op, pid, tracks, timestamp: Date.now() });
+  log.info(TAG, "playlistTracks result", { op, pid, code: r.code, status: r.status, bodyCode: r.body?.code });
   return r;
 }
 
