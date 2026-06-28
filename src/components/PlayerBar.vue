@@ -334,9 +334,11 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   z-index: 50;
   display: flex;
+  align-items: center;
   justify-content: center;
+  height: 124px;
 }
-.volume { width: 14px; height: 100px; }
+.volume { width: 14px; height: 100px; flex-shrink: 0; }
 .vol-icon { width: 28px; height: 28px; }
 .vol-drop-enter-active, .vol-drop-leave-active { transition: opacity 0.15s, transform 0.15s; }
 .vol-drop-enter-from, .vol-drop-leave-to { opacity: 0; transform: translateX(50%) translateY(8px); }
