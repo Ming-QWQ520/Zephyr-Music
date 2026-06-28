@@ -527,15 +527,19 @@ export async function searchSongs(keywords: string, limit = 30, offset = 0): Pro
 
 /** 搜索建议（/search/suggest）
  *  传入搜索关键词可获得搜索建议，结果包含单曲、歌手、歌单信息
- *  type=mobile 返回移动端数据（歌曲信息更完整）
+ *  type=pc 返回完整歌曲列表（含 songs 数组）
+ *  type=mobile 只返回 allMatch（匹配建议，无实际歌曲）
  */
-export async function searchSuggest(keywords: string, type: "mobile" | "pc" = "mobile"): Promise<{
+export async function searchSuggest(keywords: string, type: "mobile" | "pc" = "pc"): Promise<{
   code: number;
   result?: {
     songs?: NeteaseSong[];
     artists?: { id: number; name: string }[];
     playlists?: { id: number; name: string }[];
     album?: { id: number; name: string }[];
+    albums?: { id: number; name: string }[];
+    allMatch?: { keyword: string; type: number }[];
+    order?: string[];
   };
 }> {
   log.info("netease-api-search", "→ searchSuggest()", { keywords, type });
@@ -546,9 +550,11 @@ export async function searchSuggest(keywords: string, type: "mobile" | "pc" = "m
   log.info("netease-api-search", "← searchSuggest result", {
     code: r.code,
     resultKeys,
+    order: r.result?.order,
     songsCount: r.result?.songs?.length || 0,
     artistsCount: r.result?.artists?.length || 0,
     playlistsCount: r.result?.playlists?.length || 0,
+    allMatchCount: r.result?.allMatch?.length || 0,
     firstSongKeys: firstSong ? Object.keys(firstSong) : [],
     firstSongPreview: firstSong ? {
       id: firstSong.id,

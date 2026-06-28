@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { searchSuggest, neteaseSongToSong } from "@/api/netease";
+import { searchSuggest, neteaseSongToSong, songDetail } from "@/api/netease";
 import { pickLocalAudioFiles } from "@/api/localMusic";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
@@ -24,17 +24,39 @@ async function runSearch(kw: string) {
   loading.value = true;
   errorMsg.value = "";
   try {
-    const res = await searchSuggest(trimmed, "mobile");
-    // 兼容多种返回格式
-    let songs = res.result?.songs || [];
-    // 如果没有 songs，检查 allMatch（search/suggest 某些情况返回 allMatch）
-    if (songs.length === 0 && (res.result as any)?.allMatch) {
-      // allMatch 只有歌曲名，无法直接播放，跳过
-      log.warn("searchview", "no songs in result, only allMatch");
+    // type=pc 返回完整 songs 数组（type=mobile 只返回 allMatch）
+    const res = await searchSuggest(trimmed, "pc");
+    const songs = res.result?.songs || [];
+    if (songs.length === 0) {
+      log.warn("searchview", "no songs in result", { resultKeys: res.result ? Object.keys(res.result) : [] });
+      results.value = [];
+      errorMsg.value = "没有找到结果，换个关键词试试";
+    } else {
+      results.value = songs.map(neteaseSongToSong);
+      log.info("searchview", "search done", { kw: trimmed, count: results.value.length, hasPic: results.value.filter(s => s.pic).length });
+      // searchSuggest 返回的 album 没有 picUrl，用 songDetail 补充封面
+      const needCover = results.value.filter(s => !s.pic && s.neteaseId);
+      if (needCover.length > 0) {
+        log.info("searchview", "fetching covers via songDetail", { count: needCover.length });
+        try {
+          const detailRes = await songDetail(needCover.map(s => s.neteaseId!));
+          const detailMap = new Map<number, string>();
+          for (const ds of (detailRes.songs || [])) {
+            const picUrl = ds.al?.picUrl || ds.album?.picUrl || "";
+            if (picUrl && ds.id) detailMap.set(ds.id, picUrl);
+          }
+          // 更新 results 中的封面
+          for (const s of results.value) {
+            if (!s.pic && s.neteaseId && detailMap.has(s.neteaseId)) {
+              s.pic = detailMap.get(s.neteaseId)!;
+            }
+          }
+          log.info("searchview", "covers fetched", { got: detailMap.size });
+        } catch (e) {
+          log.warn("searchview", "fetch covers failed", { error: String(e) });
+        }
+      }
     }
-    results.value = songs.map(neteaseSongToSong);
-    log.info("searchview", "search done", { kw: trimmed, count: results.value.length, hasPic: results.value.filter(s => s.pic).length });
-    if (!results.value.length) errorMsg.value = "没有找到结果，换个关键词试试";
   } catch (e) {
     results.value = [];
     errorMsg.value = String(e instanceof Error ? e.message : e);
