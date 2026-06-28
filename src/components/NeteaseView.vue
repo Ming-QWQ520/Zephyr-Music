@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import {
   playlistTrackAll, recommendSongs, userRecord,
@@ -144,10 +144,19 @@ function getPlayCount(songId: string): number {
 const contextMenu = ref<{ visible: boolean; x: number; y: number; song: Song | null }>({ visible: false, x: 0, y: 0, song: null });
 const ctxSongLiked = ref(false);  // 当前右键歌曲是否已喜欢
 const showPlaylistPicker = ref(false);  // 是否显示收藏到歌单子菜单
+const showPlayNextSub = ref(false);  // 是否显示下一首播放子菜单
+/** 当前右键的歌曲是否在歌单/喜欢音乐视图中（可删除） */
+const ctxCanRemoveFromPlaylist = computed(() => {
+  if (!contextMenu.value.song || contextMenu.value.song.source !== "netease") return false;
+  const pid = selectedPlaylistId.value;
+  // 每日推荐(-1)和听歌排行(-2)不可删除；歌单和喜欢音乐(>0)可删除
+  return pid !== null && pid > 0;
+});
 function onContextMenu(e: MouseEvent, song: Song) {
   e.preventDefault();
   contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, song };
   showPlaylistPicker.value = false;
+  showPlayNextSub.value = false;
   // 查询喜欢状态
   if (song.source === "netease" && song.neteaseId) {
     getCachedLikeList().then(set => { ctxSongLiked.value = set.has(song.neteaseId!); }).catch(() => {});
@@ -155,10 +164,28 @@ function onContextMenu(e: MouseEvent, song: Song) {
     ctxSongLiked.value = false;
   }
 }
-function closeContextMenu() { contextMenu.value.visible = false; showPlaylistPicker.value = false; }
+function closeContextMenu() { contextMenu.value.visible = false; showPlaylistPicker.value = false; showPlayNextSub.value = false; }
 function ctxPlay() { if (contextMenu.value.song) store.playNow(contextMenu.value.song); closeContextMenu(); }
-function ctxPlayNext() { if (contextMenu.value.song) store.playNextSong(contextMenu.value.song); closeContextMenu(); }
+function ctxPlayNext() { if (contextMenu.value.song) store.playNext(contextMenu.value.song); closeContextMenu(); }
+function ctxPlayLast() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
 function ctxAddToQueue() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
+
+// 从当前歌单删除歌曲
+async function ctxRemoveFromPlaylist() {
+  const song = contextMenu.value.song;
+  const pid = selectedPlaylistId.value;
+  if (!song || song.source !== "netease" || !song.neteaseId || !pid || pid <= 0) return;
+  try {
+    await playlistTracks("del", pid, song.neteaseId);
+    log.info("netease-view", "removed from playlist", { songId: song.neteaseId, playlistId: pid });
+    // 从当前列表移除
+    const idx = currentPlaylistSongs.value.findIndex(s => s.id === song.id);
+    if (idx >= 0) currentPlaylistSongs.value.splice(idx, 1);
+  } catch (e) {
+    log.warn("netease-view", "remove from playlist failed", { error: String(e) });
+  }
+  closeContextMenu();
+}
 
 // 喜欢/取消喜欢
 async function ctxToggleLike() {
@@ -318,9 +345,25 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       <div v-if="contextMenu.visible && contextMenu.song"
         class="context-menu" :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }" @click.stop>
         <button class="ctx-item" @click="ctxPlay"><Icon name="play" :size="14" /><span>播放</span></button>
-        <button class="ctx-item" @click="ctxPlayNext"><Icon name="next" :size="14" /><span>下一首播放</span></button>
-        <button class="ctx-item" @click="ctxAddToQueue"><Icon name="plus" :size="14" /><span>加入队列</span></button>
+        <!-- 下一首播放：hover 展开子菜单 -->
+        <div class="ctx-item-wrapper" @mouseenter="showPlayNextSub = true" @mouseleave="showPlayNextSub = false">
+          <button class="ctx-item" @click="ctxPlayNext">
+            <Icon name="next" :size="14" /><span>下一首播放</span><Icon name="chevronRight" :size="12" class="ctx-arrow" />
+          </button>
+          <div v-if="showPlayNextSub" class="ctx-flyout" @click.stop>
+            <button class="ctx-flyout-item" @click="ctxPlayNext">
+              <Icon name="next" :size="14" /><span>下一首播放</span>
+            </button>
+            <button class="ctx-flyout-item" @click="ctxPlayLast">
+              <Icon name="list" :size="14" /><span>最后一首播放</span>
+            </button>
+          </div>
+        </div>
         <div class="ctx-divider" />
+        <!-- 从此歌单删除（仅在歌单/喜欢音乐视图中显示） -->
+        <button v-if="ctxCanRemoveFromPlaylist" class="ctx-item ctx-danger" @click="ctxRemoveFromPlaylist">
+          <Icon name="trash" :size="14" /><span>从此歌单删除</span>
+        </button>
         <!-- 喜欢按钮 -->
         <button v-if="contextMenu.song.source === 'netease'" class="ctx-item" @click="ctxToggleLike">
           <img v-if="ctxSongLiked" src="/icons/like.svg" alt="liked" class="ctx-like-icon" />
@@ -329,7 +372,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </button>
         <!-- 收藏到歌单 -->
         <button v-if="contextMenu.song.source === 'netease'" class="ctx-item" @click="ctxShowPlaylistPicker">
-          <Icon name="folder" :size="14" /><span>收藏到歌单</span><Icon name="chevronRight" :size="12" class="ctx-arrow" />
+          <Icon name="folder" :size="14" /><span>添加到歌单</span><Icon name="chevronRight" :size="12" class="ctx-arrow" />
         </button>
         <!-- 歌单子菜单 -->
         <div v-if="showPlaylistPicker" class="ctx-submenu" @click.stop>
@@ -427,6 +470,25 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctx-item .ctx-arrow { margin-left: auto; opacity: 0.5; }
 .ctx-like-icon { width: 14px; height: 14px; flex-shrink: 0; }
 .ctx-divider { height: 1px; background: var(--border); margin: 4px 8px; }
+/* 下一首播放 hover 子菜单 */
+.ctx-item-wrapper { position: relative; }
+.ctx-flyout {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  min-width: 150px;
+  background: var(--bg-elev-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+  padding: 4px;
+  margin-left: 4px;
+}
+.ctx-flyout-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--text); text-align: left; transition: background 0.1s; }
+.ctx-flyout-item:hover { background: var(--bg-hover); color: var(--accent); }
+/* 危险操作（删除） */
+.ctx-danger { color: var(--text-secondary); }
+.ctx-danger:hover { color: #ff4d4f; background: rgba(255, 77, 79, 0.1); }
 /* 歌单子菜单 */
 .ctx-submenu { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 4px; }
 .ctx-submenu-title { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px; }
