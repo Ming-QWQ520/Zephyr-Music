@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { searchSongs } from "@/api/music";
+import { searchSuggest, neteaseSongToSong } from "@/api/netease";
 import { pickLocalAudioFiles } from "@/api/localMusic";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
@@ -24,7 +24,9 @@ async function runSearch(kw: string) {
   loading.value = true;
   errorMsg.value = "";
   try {
-    results.value = await searchSongs(trimmed, 50);
+    const res = await searchSuggest(trimmed, "mobile");
+    const songs = res.result?.songs || [];
+    results.value = songs.map(neteaseSongToSong);
     if (!results.value.length) errorMsg.value = "没有找到结果，换个关键词试试";
   } catch (e) {
     results.value = [];

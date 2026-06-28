@@ -522,6 +522,30 @@ export async function searchSongs(keywords: string, limit = 30, offset = 0): Pro
   return r;
 }
 
+/** 搜索建议（/search/suggest）
+ *  传入搜索关键词可获得搜索建议，结果包含单曲、歌手、歌单信息
+ *  type=mobile 返回移动端数据（歌曲信息更完整）
+ */
+export async function searchSuggest(keywords: string, type: "mobile" | "pc" = "mobile"): Promise<{
+  code: number;
+  result?: {
+    songs?: NeteaseSong[];
+    artists?: { id: number; name: string }[];
+    playlists?: { id: number; name: string }[];
+    album?: { id: number; name: string }[];
+  };
+}> {
+  log.info(TAG, "searchSuggest()", { keywords, type });
+  const r = await apiGet("/search/suggest", { keywords, type });
+  log.info(TAG, "searchSuggest result", {
+    code: r.code,
+    songsCount: r.result?.songs?.length || 0,
+    artistsCount: r.result?.artists?.length || 0,
+    playlistsCount: r.result?.playlists?.length || 0,
+  });
+  return r;
+}
+
 // ===== 喜欢/收藏 =====
 
 /** 喜欢歌曲（旧版 /like）
