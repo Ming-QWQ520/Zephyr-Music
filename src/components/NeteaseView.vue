@@ -45,7 +45,7 @@ async function selectPlaylist(pl: NeteasePlaylist) {
   selectedPlaylistId.value = pl.id;
   selectedPlaylistName.value = pl.name;
   selectedPlaylistCover.value = pl.coverImgUrl || "";
-  loadingSongs.value = true; currentPlaylistSongs.value = [];
+  loadingSongs.value = true;
   try {
     const res = await playlistTrackAll(pl.id);
     currentPlaylistSongs.value = (res.songs || []).map(neteaseSongToSong);
@@ -54,12 +54,13 @@ async function selectPlaylist(pl: NeteasePlaylist) {
 }
 
 async function loadDailyRecommend() {
+  if (selectedPlaylistId.value === -1 && currentPlaylistSongs.value.length > 0) return;
   isRecordView.value = false;
   playCountMap.value = new Map();
   selectedPlaylistId.value = -1;
   selectedPlaylistName.value = "每日推荐";
   selectedPlaylistCover.value = "";
-  loadingSongs.value = true; currentPlaylistSongs.value = [];
+  loadingSongs.value = true;
   try {
     const res = await recommendSongs();
     currentPlaylistSongs.value = (res.data?.dailySongs || []).map(neteaseSongToSong);
@@ -87,6 +88,8 @@ function playSong(idx: number) {
  *  截取前 300 首，同时记录每首歌的播放次数用于显示
  */
 async function loadRecord(type: 0 | 1 = 1) {
+  // 如果已经在听歌排行视图且类型相同且已有数据，不重复加载
+  if (isRecordView.value && recordType.value === type && currentPlaylistSongs.value.length > 0) return;
   log.info("netease-view", "loadRecord() start", { type });
   const user = await getCachedUser();
   if (!user) {
@@ -99,7 +102,7 @@ async function loadRecord(type: 0 | 1 = 1) {
   selectedPlaylistId.value = -2;
   selectedPlaylistName.value = "听歌排行";
   selectedPlaylistCover.value = "";
-  loadingSongs.value = true; currentPlaylistSongs.value = [];
+  loadingSongs.value = true;
   playCountMap.value = new Map();
   try {
     const res = await userRecord(user.userId, type);
@@ -180,8 +183,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
     <!-- 已登录：只显示歌曲表格（歌单列表在侧边栏）-->
     <div v-else class="ne-songs">
-      <header class="songs-header">
-        <div class="songs-header-cover">
+      <header class="songs-header" :class="{ 'no-cover': isRecordView }">
+        <div v-if="!isRecordView" class="songs-header-cover">
           <img v-if="selectedPlaylistCover" :src="selectedPlaylistCover" alt="" referrerpolicy="no-referrer" />
           <Icon v-else name="music" :size="32" />
         </div>
@@ -203,7 +206,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       </header>
 
       <div class="songs-body nice-scroll">
-        <div v-if="loadingSongs" class="songs-loading">加载中...</div>
+        <div v-if="loadingSongs && !currentPlaylistSongs.length" class="songs-loading">加载中...</div>
         <div v-else-if="!currentPlaylistSongs.length" class="songs-empty">
           <Icon name="music" :size="42" /><p>选择左侧歌单查看歌曲</p>
         </div>
@@ -250,6 +253,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 .ne-songs { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .songs-header { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.songs-header.no-cover { gap: 0; }
 .songs-header-cover { width: 64px; height: 64px; border-radius: 10px; flex-shrink: 0; background: var(--bg-elev-3); overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .songs-header-cover img { width: 100%; height: 100%; object-fit: cover; }
 .songs-header-info { flex: 1; min-width: 0; }

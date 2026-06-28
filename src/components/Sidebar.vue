@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import Icon from "@/components/Icon.vue";
 import type { ViewKey } from "@/types";
@@ -38,6 +38,19 @@ function openRecord() {
   store.setView("netease");
 }
 
+/** 当前选中的侧边栏项标识，用于高亮显示 */
+const activeItem = computed<string>(() => {
+  if (store.currentView === "library") return "library";
+  if (store.currentView === "netease") {
+    if (store.pendingPlaylistId === -2) return "record";
+    // 检查 pendingPlaylistId 或已选歌单
+    const pid = store.pendingPlaylistId;
+    if (pid !== null && pid > 0) return `pl-${pid}`;
+    return "";
+  }
+  return "";
+});
+
 onMounted(() => { loadPlaylists(); });
 
 // 监听用户登录状态变化，登录后及时获取歌单
@@ -64,15 +77,15 @@ watch(() => _cachedUser.value, (user) => {
     <!-- 我的 -->
     <div class="sb-section">
       <div class="sb-section-title">我的</div>
-      <button v-if="favPlaylist" class="sb-item" @click="openFav">
+      <button v-if="favPlaylist" class="sb-item" :class="{ active: activeItem === 'fav' }" @click="openFav">
         <Icon name="heart" :size="16" />
         <span>我喜欢的音乐</span>
       </button>
-      <button class="sb-item" @click="openRecord">
+      <button class="sb-item" :class="{ active: activeItem === 'record' }" @click="openRecord">
         <Icon name="history" :size="16" />
         <span>听歌排行</span>
       </button>
-      <button class="sb-item" :class="{ active: store.currentView === 'library' }"
+      <button class="sb-item" :class="{ active: activeItem === 'library' }"
         @click="selectView('library')">
         <Icon name="clock" :size="16" />
         <span>最近播放</span>
@@ -88,7 +101,7 @@ watch(() => _cachedUser.value, (user) => {
       </button>
       <div v-show="showPlaylists" class="sb-pl-list nice-scroll">
         <button v-for="pl in neteasePlaylists.slice(1)" :key="pl.id"
-          class="sb-pl-item" @click="openPlaylist(pl)">
+          class="sb-pl-item" :class="{ active: activeItem === `pl-${pl.id}` }" @click="openPlaylist(pl)">
           <div class="pl-cover">
             <img v-if="pl.coverImgUrl" :src="pl.coverImgUrl" :alt="pl.name" referrerpolicy="no-referrer" />
             <Icon v-else name="music" :size="12" />
@@ -116,7 +129,7 @@ watch(() => _cachedUser.value, (user) => {
   display: flex; align-items: center; gap: 10px;
   height: 34px; padding: 0 10px; border-radius: 8px;
   color: var(--text-secondary); font-size: 13px; font-weight: 500;
-  transition: all 0.15s; white-space: nowrap;
+  transition: color 0.15s, background 0.15s; white-space: nowrap;
 }
 .sb-item:hover { color: var(--text); background: var(--bg-hover); }
 .sb-item.active { color: var(--accent); background: var(--accent-soft); }
@@ -134,6 +147,8 @@ watch(() => _cachedUser.value, (user) => {
   text-align: left; width: 100%;
 }
 .sb-pl-item:hover { background: var(--bg-hover); }
+.sb-pl-item.active { background: var(--accent-soft); }
+.sb-pl-item.active .pl-name { color: var(--accent); }
 .pl-cover {
   width: 28px; height: 28px; border-radius: 5px; flex-shrink: 0;
   background: var(--bg-elev-3); overflow: hidden;
