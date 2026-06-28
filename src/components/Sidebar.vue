@@ -130,9 +130,21 @@ watch(() => _cachedUser.value, (user) => {
   height: 34px; padding: 0 10px; border-radius: 8px;
   color: var(--text-secondary); font-size: 13px; font-weight: 500;
   transition: color 0.15s, background 0.15s; white-space: nowrap;
+  position: relative;
 }
 .sb-item:hover { color: var(--text); background: var(--bg-hover); }
 .sb-item.active { color: var(--accent); background: var(--accent-soft); }
+.sb-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
 .sb-playlists { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 4px; }
 .sb-pl-header {
   display: flex; align-items: center; gap: 6px;
@@ -144,11 +156,22 @@ watch(() => _cachedUser.value, (user) => {
 .sb-pl-item {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 8px; border-radius: 6px; transition: background 0.15s;
-  text-align: left; width: 100%;
+  text-align: left; width: 100%; position: relative;
 }
 .sb-pl-item:hover { background: var(--bg-hover); }
 .sb-pl-item.active { background: var(--accent-soft); }
 .sb-pl-item.active .pl-name { color: var(--accent); }
+.sb-pl-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
 .pl-cover {
   width: 28px; height: 28px; border-radius: 5px; flex-shrink: 0;
   background: var(--bg-elev-3); overflow: hidden;

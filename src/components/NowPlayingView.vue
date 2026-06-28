@@ -4,6 +4,7 @@ import { usePlayerStore } from "@/stores/player";
 import { formatTime } from "@/composables/utils";
 import { log } from "@/composables/logger";
 import { useAudioVisualizer } from "@/composables/useAudioVisualizer";
+import { likeSong, getCachedLikeList, addLikeCache, removeLikeCache } from "@/api/netease";
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
@@ -11,6 +12,35 @@ import type { LyricLine } from "@/types";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
+
+// ===== 喜欢歌曲 =====
+const liked = ref(false);
+const likeLoading = ref(false);
+
+async function toggleLike() {
+  const song = store.currentSong;
+  if (!song || song.source !== "netease" || !song.neteaseId) return;
+  likeLoading.value = true;
+  try {
+    const newLike = !liked.value;
+    await likeSong(song.neteaseId, newLike);
+    liked.value = newLike;
+    if (newLike) addLikeCache(song.neteaseId);
+    else removeLikeCache(song.neteaseId);
+  } catch (e) {
+    log.warn("nowplaying", "like failed", { error: String(e) });
+  }
+  likeLoading.value = false;
+}
+
+watch(() => store.currentSong, async (song) => {
+  liked.value = false;
+  if (!song || song.source !== "netease" || !song.neteaseId) return;
+  try {
+    const likeSet = await getCachedLikeList();
+    liked.value = likeSet.has(song.neteaseId);
+  } catch { /* ignore */ }
+}, { immediate: true });
 
 // ----- Audio visualizer -----
 // Pure procedural simulation — never touches the <audio> element, so it
@@ -1024,6 +1054,18 @@ const queueList = computed(() => store.queue);
               <Icon name="music" :size="64" />
             </div>
           </div>
+          <!-- 喜欢按钮：封面右下角，黑色 RGBA 0.1 透明背景 -->
+          <button
+            v-if="song?.source === 'netease'"
+            class="cover-like-btn"
+            :class="{ liked }"
+            :disabled="likeLoading"
+            :title="liked ? '取消喜欢' : '喜欢'"
+            @click.stop="toggleLike"
+          >
+            <img v-if="liked" src="/icons/like.svg" alt="liked" class="cover-like-icon" />
+            <img v-else src="/icons/not_like.svg" alt="not liked" class="cover-like-icon" />
+          </button>
         </div>
 
         <div class="song-meta">
@@ -1390,6 +1432,30 @@ const queueList = computed(() => store.queue);
 }
 .cover-wrap.rectangle { aspect-ratio: 1 / 1; border-radius: 12px; }
 .cover-wrap.rectangle .cover { border-radius: 12px; }
+/* 封面右下角喜欢按钮 */
+.cover-like-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.2s, transform 0.12s;
+  z-index: 5;
+}
+.cover-like-btn:hover {
+  background: rgba(0, 0, 0, 0.25);
+  transform: scale(1.08);
+}
+.cover-like-btn:active { transform: scale(0.95); }
+.cover-like-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cover-like-icon { width: 20px; height: 20px; display: inline-block; pointer-events: none; }
 .cover-shadow {
   position: absolute;
   inset: 0;

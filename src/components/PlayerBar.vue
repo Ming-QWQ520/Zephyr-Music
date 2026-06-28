@@ -152,7 +152,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   <footer class="player-bar" :class="{ 'has-song': store.currentSong }">
     <!-- Left: vinyl cover + meta -->
     <div class="left-block" @click="openFullscreen">
-      <div class="vinyl" :class="{ spinning: store.isPlaying }">
+      <div class="vinyl" :class="{ spinning: store.isPlaying && settings.coverRotation }">
         <div class="cover">
           <img v-if="store.currentSong?.pic" :src="store.currentSong.pic" :alt="store.currentSong.name" referrerpolicy="no-referrer" />
           <Icon v-else name="music" :size="22" />
