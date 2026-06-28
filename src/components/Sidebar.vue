@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
+import { ref, onMounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import Icon from "@/components/Icon.vue";
 import type { ViewKey } from "@/types";
-import { getCachedPlaylists, type NeteasePlaylist } from "@/api/netease";
+import { getCachedPlaylists, _cachedUser, type NeteasePlaylist } from "@/api/netease";
 
 const store = usePlayerStore();
 
@@ -32,13 +32,20 @@ function openFav() {
   if (favPlaylist.value) openPlaylist(favPlaylist.value);
 }
 
-/** 打开播放记录：设置特殊 pendingPlaylistId = -2 */
+/** 打开听歌排行：设置特殊 pendingPlaylistId = -2 */
 function openRecord() {
   store.pendingPlaylistId = -2;
   store.setView("netease");
 }
 
 onMounted(() => { loadPlaylists(); });
+
+// 监听用户登录状态变化，登录后及时获取歌单
+watch(() => _cachedUser.value, (user) => {
+  if (user && neteasePlaylists.value.length === 0) {
+    loadPlaylists();
+  }
+}, { immediate: true });
 </script>
 
 <template>

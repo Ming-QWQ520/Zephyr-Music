@@ -4,7 +4,7 @@ import { usePlayerStore } from "@/stores/player";
 import {
   playlistTrackAll, recommendSongs, userRecord,
   getCachedUser, getCachedPlaylists,
-  neteaseSongToSong, getCookie,
+  neteaseSongToSong, getCookie, _cachedUser,
   type NeteasePlaylist,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
@@ -147,6 +147,14 @@ function onDocClick() { closeContextMenu(); }
 
 onMounted(() => { document.addEventListener("click", onDocClick); loadData(); });
 
+// 监听用户登录状态变化，登录后及时获取歌单
+watch(() => _cachedUser.value, (user) => {
+  if (user && !loggedIn.value) {
+    log.info("netease-view", "user logged in, reloading data");
+    loadData();
+  }
+}, { immediate: true });
+
 watch(() => store.pendingPlaylistId, (id) => {
   if (id !== null) {
     if (id === -1) { loadDailyRecommend(); }
@@ -207,7 +215,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
             <span v-else class="col-dur">时长</span>
           </div>
           <div v-for="(song, idx) in currentPlaylistSongs" :key="song.id"
-            class="song-trow" :class="{ active: song.id === store.currentSong?.id }"
+            class="song-trow" :class="{ active: song.id === store.currentSong?.id, 'record-row': isRecordView }"
             @dblclick="playSong(idx)"
             @contextmenu="onContextMenu($event, song)">
             <span class="col-idx">{{ idx + 1 }}</span>
@@ -263,7 +271,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .songs-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-tertiary); padding: 48px; }
 .song-thead, .song-trow { display: grid; grid-template-columns: 40px 1fr 180px 56px; gap: 12px; padding: 7px 12px; align-items: center; }
 /* 听歌排行视图：用播放次数列替换时长列 */
-.song-thead.record-thead, .song-trow:has(.col-playcount) { grid-template-columns: 40px 1fr 180px 80px; }
+.song-thead.record-thead, .song-trow.record-row { grid-template-columns: 40px 1fr 180px 80px; }
 .song-thead { position: sticky; top: 0; z-index: 1; background: var(--bg-elev-1); border-bottom: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); text-transform: uppercase; }
 .song-trow { font-size: 13px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.03); transition: background 0.1s; user-select: none; }
 .song-trow:hover { background: var(--bg-hover); }
