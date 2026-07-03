@@ -663,17 +663,22 @@ export type AudioLevel = "standard" | "higher" | "exhigh" | "lossless" | "hires"
 
 // ===== 搜索 =====
 
-/** 搜索歌曲（网易云 API）
+/** 搜索（网易云 API /search）
  *  keywords: 关键词, limit: 返回数量, offset: 偏移
+ *  type: 搜索类型；默认为 1 即单曲
+ *    1: 单曲, 10: 专辑, 100: 歌手, 1000: 歌单, 1002: 用户, 1004: MV, 1006: 歌词, 1009: 电台, 1014: 视频, 1018: 综合
  */
-export async function searchSongs(keywords: string, limit = 30, offset = 0): Promise<{
+export async function searchSongs(keywords: string, limit = 30, offset = 0, type = 1): Promise<{
   code: number;
-  result?: { songs: NeteaseSong[]; songCount: number };
+  result?: { songs: NeteaseSong[]; songCount: number; [key: string]: any };
 }> {
-  log.info(TAG, "searchSongs()", { keywords, limit, offset });
-  const r = await apiGet("/search", { keywords, limit, offset });
-  log.info(TAG, "searchSongs result", {
-    code: r.code, count: r.result?.songs?.length || 0, songCount: r.result?.songCount,
+  log.info("netease-api-search", "→ searchSongs()", { keywords, limit, offset, type });
+  const r = await apiGet("/search", { keywords, limit, offset, type });
+  log.info("netease-api-search", "← searchSongs result", {
+    code: r.code,
+    resultKeys: r.result ? Object.keys(r.result) : [],
+    songsCount: r.result?.songs?.length || 0,
+    songCount: r.result?.songCount,
   });
   return r;
 }

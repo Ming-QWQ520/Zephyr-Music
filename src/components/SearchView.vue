@@ -13,6 +13,18 @@ const results = ref<Song[]>([]);
 const loading = ref(false);
 const errorMsg = ref("");
 const localOpen = ref(false);
+/** 搜索类型：1=单曲 */
+const searchType = ref(1);
+const searchTypes = [
+  { value: 1, label: "单曲" },
+  { value: 10, label: "专辑" },
+  { value: 100, label: "歌手" },
+  { value: 1000, label: "歌单" },
+  { value: 1002, label: "用户" },
+  { value: 1004, label: "MV" },
+  { value: 1006, label: "歌词" },
+  { value: 1018, label: "综合" },
+];
 
 async function runSearch(kw: string) {
   const trimmed = kw.trim();
@@ -25,7 +37,7 @@ async function runSearch(kw: string) {
   errorMsg.value = "";
   try {
     // 使用 /search 接口（返回更多结果，含 artists/album/duration）
-    const res = await searchSongs(trimmed, 50);
+    const res = await searchSongs(trimmed, 50, 0, searchType.value);
     const songs = res.result?.songs || [];
     if (songs.length === 0) {
       results.value = [];
@@ -119,6 +131,17 @@ watch(
         <span>{{ localOpen ? "选择中..." : "打开本地文件" }}</span>
       </button>
     </header>
+
+    <!-- 搜索类型筛选 -->
+    <div class="search-types">
+      <button
+        v-for="t in searchTypes"
+        :key="t.value"
+        class="search-type-btn"
+        :class="{ active: searchType === t.value }"
+        @click="searchType = t.value; if (store.searchKeyword) runSearch(store.searchKeyword)"
+      >{{ t.label }}</button>
+    </div>
 
     <div class="results nice-scroll">
       <div v-if="loading" class="state">
@@ -236,6 +259,24 @@ watch(
   opacity: 0.7;
   pointer-events: none;
 }
+
+/* 搜索类型筛选 */
+.search-types {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.search-type-btn {
+  padding: 5px 14px;
+  border-radius: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-elev-3);
+  transition: all 0.15s;
+}
+.search-type-btn:hover { color: var(--text); }
+.search-type-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
 
 .results {
   flex: 1;

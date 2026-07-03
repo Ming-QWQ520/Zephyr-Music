@@ -136,6 +136,10 @@ watch(() => settings.audioLevel, async () => {
 // 音量 hover
 const volHover = ref(false);
 
+// 播放队列弹窗
+const showQueuePopup = ref(false);
+const queueList = computed(() => store.queue);
+
 // 鼠标滚轮调节音量：向上增大，向下减小
 function onVolWheel(e: WheelEvent) {
   e.preventDefault();
@@ -148,12 +152,14 @@ function onVolWheel(e: WheelEvent) {
   volHover.value = true;
 }
 
-// 点击外部关闭音质弹窗
+// 点击外部关闭音质弹窗和播放队列弹窗
 function onDocClick(e: MouseEvent) {
-  if (!levelPopupOpen.value) return;
   const target = e.target as HTMLElement;
-  if (target && !target.closest(".level-wrap")) {
+  if (levelPopupOpen.value && target && !target.closest(".level-wrap")) {
     levelPopupOpen.value = false;
+  }
+  if (showQueuePopup.value && target && !target.closest(".center-block") && !target.closest(".queue-popup")) {
+    showQueuePopup.value = false;
   }
 }
 onMounted(() => { document.addEventListener("click", onDocClick); });
@@ -204,7 +210,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         <button class="ctrl-btn" :disabled="!store.hasNext" title="下一首" @click.stop="store.next()">
           <Icon name="next" :size="20" />
         </button>
-        <button class="ctrl-btn" :class="{ active: store.currentView === 'queue' }" title="播放队列" @click.stop="store.setView(store.currentView === 'queue' ? 'netease' : 'queue')">
+        <button class="ctrl-btn" :class="{ active: showQueuePopup }" title="播放队列" @click.stop="showQueuePopup = !showQueuePopup">
           <Icon name="list" :size="18" />
         </button>
       </div>
@@ -249,6 +255,38 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       </div>
     </div>
   </footer>
+
+  <!-- 播放队列弹窗（从右侧弹出） -->
+  <Transition name="queue-slide">
+    <aside v-if="showQueuePopup" class="queue-popup" @click.stop>
+      <header class="qp-head">
+        <h3>播放队列</h3>
+        <span class="qp-count">{{ queueList.length }} 首</span>
+        <button class="icon-btn" title="关闭" @click="showQueuePopup = false">
+          <Icon name="close" :size="18" />
+        </button>
+      </header>
+      <div class="qp-list nice-scroll">
+        <button
+          v-for="(s, idx) in queueList"
+          :key="s.id"
+          class="qp-item"
+          :class="{ active: s.id === store.currentSong?.id }"
+          @click="() => { store.currentIndex = idx; store.setPlaying(true); const song = store.queue[idx]; if (song) store.loadLyrics(song); }"
+        >
+          <div class="qp-cover">
+            <img v-if="s.pic" :src="s.pic" :alt="s.name" referrerpolicy="no-referrer" />
+            <Icon v-else name="music" :size="14" />
+          </div>
+          <div class="qp-meta">
+            <div class="qp-title truncate">{{ s.name }}</div>
+            <div class="qp-artist truncate">{{ s.artist }}</div>
+          </div>
+          <Icon v-if="s.id === store.currentSong?.id && store.isPlaying" name="volume" :size="14" class="qp-now" />
+        </button>
+      </div>
+    </aside>
+  </Transition>
 </template>
 
 <style scoped>
@@ -370,4 +408,54 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   .level-btn { display: none; }
 }
 @keyframes vinyl-spin { to { transform: rotate(360deg); } }
+
+/* 播放队列弹窗 */
+.queue-popup {
+  position: fixed;
+  right: 0;
+  bottom: var(--playerbar-h);
+  width: 340px;
+  max-width: 90vw;
+  height: 420px;
+  max-height: 60vh;
+  background: var(--bg-elev-3);
+  border: 1px solid var(--border-strong);
+  border-right: none;
+  border-radius: 12px 0 0 12px;
+  box-shadow: -8px 0 32px rgba(0,0,0,0.4);
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.qp-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.qp-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.qp-count { font-size: 11px; color: var(--text-tertiary); }
+.qp-head .icon-btn { margin-left: auto; width: 28px; height: 28px; color: var(--text-tertiary); }
+.qp-head .icon-btn:hover { color: var(--text); }
+.qp-list { flex: 1; overflow-y: auto; padding: 4px; }
+.qp-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 7px 10px; border-radius: 8px;
+  text-align: left; transition: background 0.1s;
+}
+.qp-item:hover { background: var(--bg-hover); }
+.qp-item.active { background: var(--accent-soft); }
+.qp-item.active .qp-title { color: var(--accent); }
+.qp-cover {
+  width: 36px; height: 36px; border-radius: 6px; flex-shrink: 0;
+  background: var(--bg-elev-1); overflow: hidden;
+  display: flex; align-items: center; justify-content: center; color: var(--text-tertiary);
+}
+.qp-cover img { width: 100%; height: 100%; object-fit: cover; }
+.qp-meta { flex: 1; min-width: 0; }
+.qp-title { font-size: 13px; color: var(--text); font-weight: 500; }
+.qp-artist { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
+.qp-now { color: var(--accent); flex-shrink: 0; }
+/* 从右侧滑入动画 */
+.queue-slide-enter-active, .queue-slide-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s; }
+.queue-slide-enter-from, .queue-slide-leave-to { transform: translateX(100%); opacity: 0; }
 </style>

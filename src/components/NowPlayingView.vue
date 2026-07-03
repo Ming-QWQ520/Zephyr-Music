@@ -1118,6 +1118,14 @@ const queueList = computed(() => store.queue);
             <button class="ctrl-btn" :disabled="!store.hasNext" title="下一首" @click="store.next()">
               <Icon name="next" :size="22" />
             </button>
+            <button
+              class="ctrl-btn"
+              :class="{ active: showQueue }"
+              title="播放列表"
+              @click="showQueue = !showQueue"
+            >
+              <Icon name="list" :size="20" />
+            </button>
           </div>
           <!-- Volume on its own row below controls (滚轮可调节) -->
           <div class="vol-row" @wheel="onVolWheel">
