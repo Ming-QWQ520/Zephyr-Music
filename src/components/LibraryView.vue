@@ -1,19 +1,37 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { ref, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
+import { recentListenList, neteaseSongToSong, getCookie } from "@/api/netease";
+import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
+import type { Song } from "@/types";
 
 const store = usePlayerStore();
 
-const history = computed(() => store.history);
+const recentSongs = ref<Song[]>([]);
+const loading = ref(false);
+
+async function loadRecent() {
+  if (!getCookie()) return;
+  loading.value = true;
+  try {
+    const res = await recentListenList();
+    const list = res.data || res.list || [];
+    recentSongs.value = list.map(item => neteaseSongToSong(item.song));
+    log.info("library-view", "recent listen loaded", { count: recentSongs.value.length });
+  } catch (e) {
+    log.warn("library-view", "load recent failed", { error: String(e) });
+    recentSongs.value = [];
+  } finally {
+    loading.value = false;
+  }
+}
 
 function play(song: Song, idx: number) {
-  store.playList(history.value, idx);
+  store.playList(recentSongs.value, idx);
 }
-</script>
 
-<script lang="ts">
-import type { Song } from "@/types";
+onMounted(() => { loadRecent(); });
 </script>
 
 <template>
@@ -22,12 +40,17 @@ import type { Song } from "@/types";
       <div class="title-block">
         <h1>最近播放</h1>
         <p class="sub">
-          共 <span class="count">{{ history.length }}</span> 首
+          共 <span class="count">{{ recentSongs.length }}</span> 首
         </p>
       </div>
     </header>
 
-    <div v-if="!history.length" class="empty">
+    <div v-if="loading" class="empty">
+      <div class="spinner" />
+      <p>加载中...</p>
+    </div>
+
+    <div v-else-if="!recentSongs.length" class="empty">
       <Icon name="history" :size="42" />
       <p>暂无播放记录</p>
       <p class="hint">播放过的歌曲会出现在这里，方便快速回看。</p>
@@ -35,7 +58,7 @@ import type { Song } from "@/types";
 
     <div v-else class="grid nice-scroll">
       <button
-        v-for="(song, idx) in history"
+        v-for="(song, idx) in recentSongs"
         :key="song.id"
         class="card"
         :class="{ active: store.currentSong?.id === song.id }"
@@ -103,6 +126,14 @@ import type { Song } from "@/types";
   max-width: 320px;
   text-align: center;
 }
+.spinner {
+  width: 28px; height: 28px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .grid {
   flex: 1;

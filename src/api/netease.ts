@@ -439,6 +439,27 @@ export function parseYrc(yrcText: string): import("@/types").LyricLine[] {
   return lines.sort((a, b) => a.time - b.time);
 }
 
+// ===== 最近听歌列表 =====
+
+/** 最近听歌列表（/recent/listen/list）
+ *  调用后可获取最近听歌列表
+ */
+export async function recentListenList(): Promise<{
+  code: number;
+  data?: { song: NeteaseSong; playTime?: number }[];
+  list?: { song: NeteaseSong; playTime?: number }[];
+}> {
+  log.info("netease-api-music", "→ recentListenList()");
+  const r = await apiGet("/recent/listen/list");
+  const list = r.data || r.list || [];
+  log.info("netease-api-music", "← recentListenList result", {
+    code: r.code,
+    count: list.length,
+    field: r.data ? "data" : r.list ? "list" : "none",
+  });
+  return r;
+}
+
 // ===== 听歌打卡 =====
 
 /** 听歌打卡（/scrobble 接口）

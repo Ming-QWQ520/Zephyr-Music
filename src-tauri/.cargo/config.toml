@@ -1,8 +1,7 @@
-# Cross-compilation config for Windows (mingw-w64).
-# Adjust the paths below to match your local mingw-w64 installation.
-# On most Linux distros with mingw-w64 installed via package manager,
-# the binaries are already on PATH and you can remove the explicit paths.
+# Cross-compilation config for Windows (llvm-mingw).
+# Uses clang linker with lld for compatibility with llvm-mingw toolchain.
 
 [target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-gcc"
+linker = "x86_64-w64-mingw32-clang"
 ar = "x86_64-w64-mingw32-ar"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
