@@ -14,7 +14,7 @@ import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import ToastContainer from "@/components/ToastContainer.vue";
 import Icon from "@/components/Icon.vue";
-import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser } from "@/api/netease";
+import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo } from "@/api/netease";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
@@ -35,12 +35,54 @@ const qrMessage = ref("");
 let qrCheckTimer: ReturnType<typeof setInterval> | null = null;
 let qrKeyVal = "";
 
+// VIP 信息和总听歌时长
+const neVipInfo = ref<{ isVip: boolean; redVipLevel: number; expireText: string } | null>(null);
+const neListenTotal = ref<string>("");
+
+/** 格式化总听歌时长（秒 → x小时y分钟） */
+function formatListenTime(seconds: number): string {
+  if (!seconds || seconds <= 0) return "0分钟";
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}小时${m}分钟`;
+  return `${m}分钟`;
+}
+
+/** 加载 VIP 信息和总听歌时长 */
+async function loadVipAndListenData() {
+  const user = _cachedUser.value;
+  if (!user) return;
+  // 并行获取 VIP 信息和总听歌时长
+  const [vipRes, listenRes] = await Promise.allSettled([
+    vipInfo(user.userId),
+    listenDataTotal(),
+  ]);
+  try {
+    if (vipRes.status === "fulfilled" && vipRes.value.data) {
+      const d = vipRes.value.data;
+      const isVip = d.isVip ?? (d.associator?.vipLevel ?? 0) > 0;
+      const level = d.redVipLevel || 0;
+      const expire = d.associator?.expireTime || d.musicPackage?.expireTime;
+      const expireText = expire ? new Date(expire).toLocaleDateString("zh-CN") : "";
+      neVipInfo.value = { isVip, redVipLevel: level, expireText };
+      log.info("app", "VIP info loaded", { isVip, level, expireText });
+    }
+  } catch (e) { log.warn("app", "load vip failed", { error: String(e) }); }
+  if (listenRes.status === "fulfilled") {
+    const time = listenRes.value.data?.time || listenRes.value.time || 0;
+    neListenTotal.value = formatListenTime(time);
+    log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
+  }
+}
+
 async function checkNeLogin() {
   if (!getCookie()) return;
   const user = await getCachedUser();
   if (user) {
     neLoggedIn.value = true;
     neUser.value = { nickname: user.nickname, avatarUrl: user.avatarUrl };
+    // 登录后加载 VIP 信息和总听歌时长
+    loadVipAndListenData();
   }
 }
 
@@ -75,6 +117,7 @@ function stopNeQrCheck() { if (qrCheckTimer) { clearInterval(qrCheckTimer); qrCh
 async function doNeLogout() {
   try { await logout(); } catch { /* ignore */ }
   neLoggedIn.value = false; neUser.value = null;
+  neVipInfo.value = null; neListenTotal.value = "";
   showLoginDropdown.value = false;
   qrStatus.value = "idle"; qrCodeImg.value = "";
 }
@@ -209,11 +252,22 @@ onUnmounted(() => {
                 </div>
                 <p class="qr-msg">{{ qrMessage }}</p>
               </template>
-              <!-- 已登录：退出 -->
+              <!-- 已登录：用户信息 + VIP + 听歌时长 + 退出 -->
               <template v-else>
                 <div class="ne-logged-info">
                   <img v-if="neUser?.avatarUrl" :src="neUser.avatarUrl" class="ne-avatar-lg" referrerpolicy="no-referrer" />
-                  <span>{{ neUser?.nickname }}</span>
+                  <span class="ne-logged-name">{{ neUser?.nickname }}</span>
+                  <!-- VIP 标识 -->
+                  <div v-if="neVipInfo" class="ne-vip-badge" :class="{ vip: neVipInfo.isVip }">
+                    <span v-if="neVipInfo.isVip">VIP{{ neVipInfo.redVipLevel || "" }}</span>
+                    <span v-else>非 VIP</span>
+                    <span v-if="neVipInfo.expireText" class="ne-vip-expire">到期: {{ neVipInfo.expireText }}</span>
+                  </div>
+                </div>
+                <!-- 总听歌时长 -->
+                <div v-if="neListenTotal" class="ne-listen-total">
+                  <Icon name="clock" :size="13" />
+                  <span>总听歌时长: {{ neListenTotal }}</span>
                 </div>
                 <button class="ne-logout-btn" @click="doNeLogout">退出登录</button>
               </template>
@@ -355,9 +409,17 @@ onUnmounted(() => {
 .qr-img { width: 160px; height: 160px; border-radius: 8px; background: #fff; padding: 6px; }
 .qr-expired { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); border-radius: 8px; color: #fff; font-size: 12px; cursor: pointer; }
 .qr-msg { font-size: 11px; color: var(--text-tertiary); margin: 8px 0 0; }
-.ne-logged-info { display: flex; flex-direction: column; align-items: center; gap: 8px; margin-bottom: 12px; }
+.ne-logged-info { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-bottom: 10px; }
 .ne-avatar-lg { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+.ne-logged-name { font-size: 14px; color: var(--text); font-weight: 600; }
 .ne-logged-info span { font-size: 13px; color: var(--text); }
+/* VIP 标识 */
+.ne-vip-badge { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 10px; border-radius: 10px; font-size: 11px; background: var(--bg-elev-1); color: var(--text-tertiary); }
+.ne-vip-badge.vip { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #fff; font-weight: 600; }
+.ne-vip-expire { font-size: 10px; opacity: 0.8; font-weight: 400; }
+/* 总听歌时长 */
+.ne-listen-total { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 11px; color: var(--text-tertiary); margin-bottom: 10px; }
+.ne-listen-total :deep(.icon-svg) { opacity: 0.7; }
 .ne-logout-btn { padding: 6px 16px; border-radius: 6px; font-size: 12px; color: var(--text-tertiary); border: 1px solid var(--border); }
 .ne-logout-btn:hover { color: var(--accent); border-color: var(--accent); }
 .dropdown-enter-active, .dropdown-leave-active { transition: all 0.15s; }

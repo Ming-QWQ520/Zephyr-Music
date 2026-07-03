@@ -142,11 +142,19 @@ export async function loginStatus(): Promise<{
 }> {
   log.info(TAG, "loginStatus()");
   const r = await apiGet("/login/status");
-  log.info(TAG, "loginStatus result", {
+  // 输出完整的原始登录数据用于调试 VIP 问题
+  log.info("netease-api-login", "← loginStatus 原始数据", {
     code: r.code,
     hasProfile: !!r.profile,
     userId: r.profile?.userId,
     nickname: r.profile?.nickname,
+    accountKeys: r.account ? Object.keys(r.account) : [],
+    profileKeys: r.profile ? Object.keys(r.profile) : [],
+    vipType: r.profile?.vipType,
+    redVipLevel: r.profile?.redVipLevel,
+    redVipLevelIcon: r.profile?.redVipLevelIcon,
+    isVip: r.profile?.vipType > 0,
+    rawPreview: truncateForLog(r, 1000),
   });
   return r;
 }
@@ -174,6 +182,61 @@ export async function logout(): Promise<{ code: number }> {
   _playlistsLoading.value = false;
   clearLikeCache();
   log.info(TAG, "logout done, cookie cleared");
+  return r;
+}
+
+// ===== VIP 信息 & 听歌足迹 =====
+
+/** 听歌足迹 - 总收听时长（/listen/data/total）
+ *  登录后调用，获取总收听时长（可能需要 VIP 权限）
+ */
+export async function listenDataTotal(): Promise<{
+  code: number;
+  data?: { time?: number; count?: number };
+  time?: number;
+  count?: number;
+}> {
+  log.info("netease-api-music", "→ listenDataTotal()");
+  const r = await apiGet("/listen/data/total");
+  log.info("netease-api-music", "← listenDataTotal result", {
+    code: r.code,
+    keys: r && typeof r === "object" ? Object.keys(r) : [],
+    time: r.data?.time || r.time,
+    count: r.data?.count || r.count,
+    rawPreview: truncateForLog(r, 500),
+  });
+  return r;
+}
+
+/** 获取 VIP 信息（/vip/info/v2，app 端）
+ *  登录后调用，获取当前 VIP 信息
+ *  uid: 用户 ID（可选）
+ */
+export async function vipInfo(uid?: number): Promise<{
+  code: number;
+  data?: {
+    redVipLevel?: number;
+    redVipLevelIcon?: string;
+    musicPackage?: { vipCode?: number; vipLevel?: number; expireTime?: number };
+    associator?: { vipCode?: number; vipLevel?: number; expireTime?: number };
+    isVip?: boolean;
+    [key: string]: any;
+  };
+}> {
+  const params: Record<string, string | number> = {};
+  if (uid) params.uid = uid;
+  log.info("netease-api-music", "→ vipInfo()", { uid });
+  const r = await apiGet("/vip/info/v2", params);
+  log.info("netease-api-music", "← vipInfo result", {
+    code: r.code,
+    keys: r && typeof r === "object" ? Object.keys(r) : [],
+    dataKeys: r.data ? Object.keys(r.data) : [],
+    redVipLevel: r.data?.redVipLevel,
+    isVip: r.data?.isVip,
+    musicPackage: r.data?.musicPackage,
+    associator: r.data?.associator,
+    rawPreview: truncateForLog(r, 800),
+  });
   return r;
 }
 
@@ -355,20 +418,26 @@ export async function songUrl(id: number): Promise<{
  *    standard 标准 / higher 较高 / exhigh 极高 / lossless 无损 / hires Hi-Res
  *    jyeffect 高清环绕声 / sky 沉浸环绕声 / dolby 杜比全景声 / jymaster 超清母带
  *  注：杜比全景声需要传入 os=pc 才能返回正常码率 url
+ *  注2：非 VIP 用户返回试听片段（freeTrialInfo 不为 null 表示试听）
  */
 export async function songUrlV1(id: number, level = "exhigh"): Promise<{
   code: number;
-  data: { id: number; url: string; br: number; size: number }[];
+  data: { id: number; url: string; br: number; size: number; freeTrialInfo?: { start: number; end: number } }[];
 }> {
   const params: Record<string, string | number | boolean> = { id, level, unblock: "true" };
   // 杜比全景声需要 os=pc
   if (level === "dolby") params.os = "pc";
   log.info("netease-api-music", "→ songUrlV1()", { id, level });
   const r = await apiGet("/song/url/v1", params);
+  const d = r.data?.[0];
   log.info("netease-api-music", "← songUrlV1 result", {
     code: r.code, count: r.data?.length || 0,
-    hasUrl: !!r.data?.[0]?.url,
-    br: r.data?.[0]?.br,
+    hasUrl: !!d?.url,
+    br: d?.br,
+    urlPreview: d?.url ? d.url.slice(0, 80) : "",
+    freeTrialInfo: d?.freeTrialInfo,
+    isTrial: !!d?.freeTrialInfo,
+    allKeys: d ? Object.keys(d) : [],
   });
   return r;
 }
