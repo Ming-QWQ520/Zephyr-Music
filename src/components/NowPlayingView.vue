@@ -489,7 +489,10 @@ const MAX_INTERLUDE_PX = 0; // interludes collapse to 0 height
 
 const activeIndex = computed(() => store.activeLyricIndex);
 
-// 逐字歌词：计算当前活动行已唱到第几个字（只算一次，而非每字算一次）
+// 逐字歌词：计算当前活动行已唱进度
+// sungWordCount = 已唱完的字数
+// activeWordProgress = 当前正在唱的字的进度 (0~1)
+// lineProgress = 整行进度 (0~1)，用于平滑擦除效果
 const sungWordCount = computed(() => {
   const idx = activeIndex.value;
   if (idx < 0) return 0;
@@ -502,6 +505,35 @@ const sungWordCount = computed(() => {
     else break;
   }
   return count;
+});
+
+/** 当前正在唱的字的进度 (0~1) */
+const activeWordProgress = computed(() => {
+  const idx = activeIndex.value;
+  if (idx < 0) return 0;
+  const line = parsedLyrics.value[idx];
+  if (!line || !line.words) return 0;
+  const t = store.currentTime;
+  const count = sungWordCount.value;
+  if (count >= line.words.length) return 1;
+  const w = line.words[count];
+  if (!w) return 0;
+  const elapsed = t - w.start;
+  return Math.max(0, Math.min(1, elapsed / w.duration));
+});
+
+/** 整行歌词的擦除进度百分比 (0~100)，用于 CSS linear-gradient */
+const activeLineWipePercent = computed(() => {
+  const idx = activeIndex.value;
+  if (idx < 0) return 0;
+  const line = parsedLyrics.value[idx];
+  if (!line || !line.words) return 0;
+  const count = sungWordCount.value;
+  const progress = activeWordProgress.value;
+  // 按字数比例计算（每个字等权重）
+  const totalWords = line.words.length;
+  const sungFraction = (count + progress) / totalWords;
+  return Math.max(0, Math.min(100, sungFraction * 100));
 });
 
 // ----- Lyric engine: each line's absolute transform -----
@@ -1182,14 +1214,17 @@ const queueList = computed(() => store.queue);
               @mouseenter="onLyricEnter(idx)"
               @mouseleave="onLyricLeave()"
             >
-              <span class="lyric-text" :class="{ 'text-shadow': settings.textShadow, 'text-glow': settings.textGlow }">
+              <span
+                class="lyric-text"
+                :class="{
+                  'text-shadow': settings.textShadow,
+                  'text-glow': settings.textGlow,
+                  'yrc-wipe': line.words && line.words.length > 0 && idx === activeIndex,
+                }"
+                :style="line.words && line.words.length > 0 && idx === activeIndex ? { '--wipe-percent': activeLineWipePercent + '%' } : {}"
+              >
                 <template v-if="line.words && line.words.length > 0">
-                  <span
-                    v-for="(word, wi) in line.words"
-                    :key="wi"
-                    class="lyric-word"
-                    :class="{ sung: idx === activeIndex && wi < sungWordCount }"
-                  >{{ word.text }}</span>
+                  {{ line.text }}
                 </template>
                 <template v-else>{{ line.text }}</template>
               </span>
@@ -1698,21 +1733,23 @@ const queueList = computed(() => store.queue);
   font-weight: inherit;
   text-align: inherit;
 }
-/* 逐字歌词：每个字一个 span */
-.lyric-word {
-  display: inline;
-  transition: color 0.25s ease, opacity 0.25s ease;
-  opacity: 0.5;
+/* 逐字歌词平滑擦除效果（像进度条从左到右） */
+.lyric-text.yrc-wipe {
+  background: linear-gradient(
+    to right,
+    #fff 0%,
+    #fff var(--wipe-percent, 0%),
+    rgba(255, 255, 255, 0.35) var(--wipe-percent, 0%),
+    rgba(255, 255, 255, 0.35) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  text-shadow: none; /* background-clip:text 不支持 text-shadow */
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.3));
 }
-/* 已唱的字：高亮白色 */
-.lyric-word.sung {
-  color: #fff;
-  opacity: 1;
-}
-/* 未唱的字（活动行内）：半透明 */
-.lyric-line.active .lyric-word:not(.sung) {
-  color: rgba(255, 255, 255, 0.4);
-}
+/* 非 YRC 行的普通歌词保持原有颜色 */
 .lyric-text.text-shadow { text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
 .lyric-text.text-glow {
   text-shadow: 0 0 18px rgba(255, 255, 255, 0.35), 0 0 4px rgba(255, 255, 255, 0.55);
