@@ -134,6 +134,62 @@ export async function qrCheck(key: string): Promise<{
   return r;
 }
 
+/** 手机登录（/login/cellphone）
+ *  phone: 手机号码
+ *  password: 密码（明文）
+ *  countrycode: 国家码（可选，用于国外手机号）
+ *  captcha: 验证码（可选，传入后 password 失效）
+ */
+export async function loginCellphone(params: {
+  phone: string;
+  password?: string;
+  countrycode?: string;
+  captcha?: string;
+}): Promise<{ code: number; cookie?: string; profile?: any; account?: any }> {
+  const p: Record<string, string> = { phone: params.phone };
+  if (params.password) p.password = params.password;
+  if (params.countrycode) p.countrycode = params.countrycode;
+  if (params.captcha) p.captcha = params.captcha;
+  log.info("netease-api-login", "→ loginCellphone()", { phone: params.phone, hasPassword: !!params.password, hasCaptcha: !!params.captcha });
+  const r = await apiGet("/login/cellphone", p);
+  log.info("netease-api-login", "← loginCellphone result", {
+    code: r.code,
+    hasProfile: !!r.profile,
+    hasCookie: !!r.cookie,
+    cookiePreview: r.cookie ? r.cookie.slice(0, 80) : "",
+  });
+  return r;
+}
+
+/** 邮箱登录（/login）
+ *  email: 163 网易邮箱
+ *  password: 密码
+ */
+export async function loginEmail(email: string, password: string): Promise<{ code: number; cookie?: string; profile?: any; account?: any }> {
+  log.info("netease-api-login", "→ loginEmail()", { email });
+  const r = await apiGet("/login", { email, password });
+  log.info("netease-api-login", "← loginEmail result", {
+    code: r.code,
+    hasProfile: !!r.profile,
+    hasCookie: !!r.cookie,
+    cookiePreview: r.cookie ? r.cookie.slice(0, 80) : "",
+  });
+  return r;
+}
+
+/** 发送手机验证码（/captcha/sent）
+ *  phone: 手机号码
+ *  ctcode: 国家码（可选）
+ */
+export async function captchaSent(phone: string, ctcode?: string): Promise<{ code: number; captcha?: boolean }> {
+  const p: Record<string, string> = { phone };
+  if (ctcode) p.ctcode = ctcode;
+  log.info("netease-api-login", "→ captchaSent()", { phone });
+  const r = await apiGet("/captcha/sent", p);
+  log.info("netease-api-login", "← captchaSent result", { code: r.code, captcha: r.captcha });
+  return r;
+}
+
 /** 登录状态 — 返回 profile（已登录）或 null（未登录） */
 export async function loginStatus(): Promise<{
   code: number;
@@ -189,10 +245,12 @@ export async function logout(): Promise<{ code: number }> {
 
 /** 听歌足迹 - 总收听时长（/listen/data/total）
  *  登录后调用，获取总收听时长（可能需要 VIP 权限）
+ *  返回字段 data.totalDuration（秒）
  */
 export async function listenDataTotal(): Promise<{
   code: number;
-  data?: { time?: number; count?: number };
+  data?: { totalDuration?: number; time?: number; count?: number };
+  totalDuration?: number;
   time?: number;
   count?: number;
 }> {
@@ -201,6 +259,7 @@ export async function listenDataTotal(): Promise<{
   log.info("netease-api-music", "← listenDataTotal result", {
     code: r.code,
     keys: r && typeof r === "object" ? Object.keys(r) : [],
+    totalDuration: r.data?.totalDuration || r.totalDuration,
     time: r.data?.time || r.time,
     count: r.data?.count || r.count,
     rawPreview: truncateForLog(r, 500),
@@ -413,30 +472,34 @@ export async function songUrl(id: number): Promise<{
   return r;
 }
 
-/** 获取音乐 URL v1（指定音质，api-enhanced 支持 unblock 解锁灰色歌曲）
+/** 获取音乐 URL v1（指定音质）
  *  level 音质等级：
  *    standard 标准 / higher 较高 / exhigh 极高 / lossless 无损 / hires Hi-Res
  *    jyeffect 高清环绕声 / sky 沉浸环绕声 / dolby 杜比全景声 / jymaster 超清母带
  *  注：杜比全景声需要传入 os=pc 才能返回正常码率 url
  *  注2：非 VIP 用户返回试听片段（freeTrialInfo 不为 null 表示试听）
+ *  注3：不使用 unblock 参数，该参数会导致返回试听片段而非完整歌曲
  */
 export async function songUrlV1(id: number, level = "exhigh"): Promise<{
   code: number;
-  data: { id: number; url: string; br: number; size: number; freeTrialInfo?: { start: number; end: number } }[];
+  data: { id: number; url: string; br: number; size: number; freeTrialInfo?: { start: number; end: number } | null }[];
 }> {
-  const params: Record<string, string | number | boolean> = { id, level, unblock: "true" };
+  const params: Record<string, string | number | boolean> = { id, level };
   // 杜比全景声需要 os=pc
   if (level === "dolby") params.os = "pc";
   log.info("netease-api-music", "→ songUrlV1()", { id, level });
   const r = await apiGet("/song/url/v1", params);
   const d = r.data?.[0];
+  // freeTrialInfo 可能是字符串 "null"，需要正确判断
+  const rawTrial = d?.freeTrialInfo;
+  const isTrial = rawTrial !== null && rawTrial !== undefined && rawTrial !== "null" && typeof rawTrial === "object";
   log.info("netease-api-music", "← songUrlV1 result", {
     code: r.code, count: r.data?.length || 0,
     hasUrl: !!d?.url,
     br: d?.br,
     urlPreview: d?.url ? d.url.slice(0, 80) : "",
-    freeTrialInfo: d?.freeTrialInfo,
-    isTrial: !!d?.freeTrialInfo,
+    freeTrialInfo: rawTrial,
+    isTrial,
     allKeys: d ? Object.keys(d) : [],
   });
   return r;

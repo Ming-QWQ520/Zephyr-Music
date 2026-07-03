@@ -14,7 +14,7 @@ import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import ToastContainer from "@/components/ToastContainer.vue";
 import Icon from "@/components/Icon.vue";
-import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo } from "@/api/netease";
+import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo, loginCellphone, loginEmail, captchaSent } from "@/api/netease";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
@@ -39,6 +39,17 @@ let qrKeyVal = "";
 const neVipInfo = ref<{ isVip: boolean; redVipLevel: number; expireText: string } | null>(null);
 const neListenTotal = ref<string>("");
 
+// 登录弹窗
+const showLoginModal = ref(false);
+const loginTab = ref<"qr" | "phone" | "email">("qr");
+const loginLoading = ref(false);
+const loginError = ref("");
+// 手机登录表单
+const phoneForm = ref({ phone: "", password: "", captcha: "", countrycode: "" });
+const captchaSentFlag = ref(false);
+// 邮箱登录表单
+const emailForm = ref({ email: "", password: "" });
+
 /** 格式化总听歌时长（秒 → x小时y分钟） */
 function formatListenTime(seconds: number): string {
   if (!seconds || seconds <= 0) return "0分钟";
@@ -58,18 +69,21 @@ async function loadVipAndListenData() {
     listenDataTotal(),
   ]);
   try {
-    if (vipRes.status === "fulfilled" && vipRes.value.data) {
-      const d = vipRes.value.data;
-      const isVip = d.isVip ?? (d.associator?.vipLevel ?? 0) > 0;
-      const level = d.redVipLevel || 0;
-      const expire = d.associator?.expireTime || d.musicPackage?.expireTime;
-      const expireText = expire ? new Date(expire).toLocaleDateString("zh-CN") : "";
-      neVipInfo.value = { isVip, redVipLevel: level, expireText };
-      log.info("app", "VIP info loaded", { isVip, level, expireText });
+    if (vipRes.status === "fulfilled") {
+      // vipInfo 可能被 apiGet 解包，也可能没有
+      const d = vipRes.value.data || vipRes.value as any;
+      if (d) {
+        const isVip = d.isVip ?? (d.associator?.vipLevel ?? 0) > 0;
+        const level = d.redVipLevel || 0;
+        const expire = d.associator?.expireTime || d.musicPackage?.expireTime;
+        const expireText = expire ? new Date(expire).toLocaleDateString("zh-CN") : "";
+        neVipInfo.value = { isVip, redVipLevel: level, expireText };
+        log.info("app", "VIP info loaded", { isVip, level, expireText });
+      }
     }
   } catch (e) { log.warn("app", "load vip failed", { error: String(e) }); }
   if (listenRes.status === "fulfilled") {
-    const time = listenRes.value.data?.time || listenRes.value.time || 0;
+    const time = listenRes.value.data?.totalDuration || listenRes.value.totalDuration || listenRes.value.data?.time || listenRes.value.time || 0;
     neListenTotal.value = formatListenTime(time);
     log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
   }
@@ -120,6 +134,81 @@ async function doNeLogout() {
   neVipInfo.value = null; neListenTotal.value = "";
   showLoginDropdown.value = false;
   qrStatus.value = "idle"; qrCodeImg.value = "";
+}
+
+/** 打开登录弹窗 */
+function openLoginModal() {
+  showLoginModal.value = true;
+  loginError.value = "";
+  if (qrStatus.value === "idle") startNeLogin();
+}
+
+/** 关闭登录弹窗 */
+function closeLoginModal() {
+  showLoginModal.value = false;
+  stopNeQrCheck();
+  loginError.value = "";
+}
+
+/** 手机登录 */
+async function doPhoneLogin() {
+  if (!phoneForm.value.phone) { loginError.value = "请输入手机号"; return; }
+  if (!phoneForm.value.password && !phoneForm.value.captcha) { loginError.value = "请输入密码或验证码"; return; }
+  loginLoading.value = true;
+  loginError.value = "";
+  try {
+    const res = await loginCellphone({
+      phone: phoneForm.value.phone,
+      password: phoneForm.value.captcha ? undefined : phoneForm.value.password,
+      countrycode: phoneForm.value.countrycode || undefined,
+      captcha: phoneForm.value.captcha || undefined,
+    });
+    if (res.code === 200 && res.cookie) {
+      setCookie(res.cookie);
+      await checkNeLogin();
+      closeLoginModal();
+    } else {
+      loginError.value = `登录失败 (code: ${res.code})`;
+    }
+  } catch (e) {
+    loginError.value = String(e instanceof Error ? e.message : e);
+  } finally {
+    loginLoading.value = false;
+  }
+}
+
+/** 发送手机验证码 */
+async function doSendCaptcha() {
+  if (!phoneForm.value.phone) { loginError.value = "请输入手机号"; return; }
+  try {
+    await captchaSent(phoneForm.value.phone, phoneForm.value.countrycode || undefined);
+    captchaSentFlag.value = true;
+    loginError.value = "验证码已发送";
+  } catch (e) {
+    loginError.value = String(e instanceof Error ? e.message : e);
+  }
+}
+
+/** 邮箱登录 */
+async function doEmailLogin() {
+  if (!emailForm.value.email) { loginError.value = "请输入邮箱"; return; }
+  if (!emailForm.value.password) { loginError.value = "请输入密码"; return; }
+  loginLoading.value = true;
+  loginError.value = "";
+  try {
+    const res = await loginEmail(emailForm.value.email, emailForm.value.password);
+    if (res.code === 200 && res.cookie) {
+      setCookie(res.cookie);
+      await checkNeLogin();
+      closeLoginModal();
+    } else {
+      loginError.value = `登录失败 (code: ${res.code})`;
+    }
+  } catch (e) {
+    loginError.value = String(e instanceof Error ? e.message : e);
+  } finally {
+    loginLoading.value = false;
+  }
 }
 
 async function minimizeWindow() {
@@ -226,7 +315,7 @@ onUnmounted(() => {
       <div class="tb-right">
         <!-- 网易云登录/头像 -->
         <div class="ne-auth tauri-no-drag">
-          <button v-if="!neLoggedIn" class="ne-login-btn" @click="showLoginDropdown = !showLoginDropdown">
+          <button v-if="!neLoggedIn" class="ne-login-btn" @click="openLoginModal">
             <Icon name="music" :size="14" />
             <span>登录</span>
           </button>
@@ -235,42 +324,23 @@ onUnmounted(() => {
             <span class="ne-name truncate">{{ neUser?.nickname }}</span>
           </button>
 
-          <!-- 登录下拉 -->
+          <!-- 已登录：用户信息下拉 -->
           <Transition name="dropdown">
-            <div v-if="showLoginDropdown" class="ne-dropdown" @click.stop>
-              <!-- 未登录：二维码 -->
-              <template v-if="!neLoggedIn">
-                <div v-if="qrStatus === 'idle'" class="qr-start">
-                  <button class="qr-gen-btn" @click="startNeLogin">生成二维码登录</button>
+            <div v-if="showLoginDropdown && neLoggedIn" class="ne-dropdown" @click.stop>
+              <div class="ne-logged-info">
+                <img v-if="neUser?.avatarUrl" :src="neUser.avatarUrl" class="ne-avatar-lg" referrerpolicy="no-referrer" />
+                <span class="ne-logged-name">{{ neUser?.nickname }}</span>
+                <div v-if="neVipInfo" class="ne-vip-badge" :class="{ vip: neVipInfo.isVip }">
+                  <span v-if="neVipInfo.isVip">VIP{{ neVipInfo.redVipLevel || "" }}</span>
+                  <span v-else>非 VIP</span>
+                  <span v-if="neVipInfo.expireText" class="ne-vip-expire">到期: {{ neVipInfo.expireText }}</span>
                 </div>
-                <div v-else-if="qrStatus === 'loading'" class="qr-loading">
-                  <div class="spinner" /><span>正在生成...</span>
-                </div>
-                <div v-else class="qr-show">
-                  <img v-if="qrCodeImg" :src="qrCodeImg" alt="二维码" class="qr-img" />
-                  <div v-if="qrStatus === 'expired'" class="qr-expired" @click="startNeLogin">点击刷新</div>
-                </div>
-                <p class="qr-msg">{{ qrMessage }}</p>
-              </template>
-              <!-- 已登录：用户信息 + VIP + 听歌时长 + 退出 -->
-              <template v-else>
-                <div class="ne-logged-info">
-                  <img v-if="neUser?.avatarUrl" :src="neUser.avatarUrl" class="ne-avatar-lg" referrerpolicy="no-referrer" />
-                  <span class="ne-logged-name">{{ neUser?.nickname }}</span>
-                  <!-- VIP 标识 -->
-                  <div v-if="neVipInfo" class="ne-vip-badge" :class="{ vip: neVipInfo.isVip }">
-                    <span v-if="neVipInfo.isVip">VIP{{ neVipInfo.redVipLevel || "" }}</span>
-                    <span v-else>非 VIP</span>
-                    <span v-if="neVipInfo.expireText" class="ne-vip-expire">到期: {{ neVipInfo.expireText }}</span>
-                  </div>
-                </div>
-                <!-- 总听歌时长 -->
-                <div v-if="neListenTotal" class="ne-listen-total">
-                  <Icon name="clock" :size="13" />
-                  <span>总听歌时长: {{ neListenTotal }}</span>
-                </div>
-                <button class="ne-logout-btn" @click="doNeLogout">退出登录</button>
-              </template>
+              </div>
+              <div v-if="neListenTotal" class="ne-listen-total">
+                <Icon name="clock" :size="13" />
+                <span>总听歌时长: {{ neListenTotal }}</span>
+              </div>
+              <button class="ne-logout-btn" @click="doNeLogout">退出登录</button>
             </div>
           </Transition>
         </div>
@@ -315,6 +385,58 @@ onUnmounted(() => {
 
     <!-- Settings (modal/fullscreen on home page) -->
     <SettingsPanel :visible="showSettings" mode="modal" @close="showSettings = false" />
+
+    <!-- 登录弹窗 -->
+    <Transition name="login-modal">
+      <div v-if="showLoginModal" class="login-modal-overlay" @click="closeLoginModal">
+        <div class="login-modal" @click.stop>
+          <button class="login-modal-close" @click="closeLoginModal"><Icon name="close" :size="20" /></button>
+          <h2 class="login-modal-title">登录网易云音乐</h2>
+          <!-- 标签页切换 -->
+          <div class="login-tabs">
+            <button class="login-tab" :class="{ active: loginTab === 'qr' }" @click="loginTab = 'qr'">扫码登录</button>
+            <button class="login-tab" :class="{ active: loginTab === 'phone' }" @click="loginTab = 'phone'">手机登录</button>
+            <button class="login-tab" :class="{ active: loginTab === 'email' }" @click="loginTab = 'email'">邮箱登录</button>
+          </div>
+
+          <!-- 扫码登录 -->
+          <div v-if="loginTab === 'qr'" class="login-qr-content">
+            <div v-if="qrStatus === 'loading'" class="qr-loading"><div class="spinner" /><span>正在生成...</span></div>
+            <div v-else class="qr-show">
+              <img v-if="qrCodeImg" :src="qrCodeImg" alt="二维码" class="qr-img" />
+              <div v-if="qrStatus === 'expired'" class="qr-expired" @click="startNeLogin">点击刷新</div>
+            </div>
+            <p class="qr-msg">{{ qrMessage }}</p>
+          </div>
+
+          <!-- 手机登录 -->
+          <div v-if="loginTab === 'phone'" class="login-form">
+            <input class="login-input" v-model="phoneForm.phone" placeholder="手机号码" type="tel" />
+            <input class="login-input" v-model="phoneForm.countrycode" placeholder="国家码（可选，如 1=美国）" type="text" />
+            <input class="login-input" v-model="phoneForm.password" placeholder="密码（与验证码二选一）" type="password" />
+            <div class="captcha-row">
+              <input class="login-input captcha-input" v-model="phoneForm.captcha" placeholder="验证码（与密码二选一）" type="text" />
+              <button class="captcha-btn" @click="doSendCaptcha" :disabled="!phoneForm.phone">发送</button>
+            </div>
+            <button class="login-submit" @click="doPhoneLogin" :disabled="loginLoading">
+              {{ loginLoading ? "登录中..." : "登录" }}
+            </button>
+          </div>
+
+          <!-- 邮箱登录 -->
+          <div v-if="loginTab === 'email'" class="login-form">
+            <input class="login-input" v-model="emailForm.email" placeholder="163 网易邮箱" type="email" />
+            <input class="login-input" v-model="emailForm.password" placeholder="密码" type="password" />
+            <button class="login-submit" @click="doEmailLogin" :disabled="loginLoading">
+              {{ loginLoading ? "登录中..." : "登录" }}
+            </button>
+          </div>
+
+          <!-- 错误提示 -->
+          <p v-if="loginError" class="login-error">{{ loginError }}</p>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Toast 通知容器（右下角） -->
     <ToastContainer />
@@ -425,6 +547,72 @@ onUnmounted(() => {
 .dropdown-enter-active, .dropdown-leave-active { transition: all 0.15s; }
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-8px); }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ===== 登录弹窗 ===== */
+.login-modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.55); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+}
+.login-modal {
+  position: relative;
+  width: 380px; max-width: 90vw;
+  background: var(--bg-elev-3); border: 1px solid var(--border-strong);
+  border-radius: 16px; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  padding: 28px 28px 24px; display: flex; flex-direction: column; align-items: center;
+}
+.login-modal-close {
+  position: absolute; top: 12px; right: 12px;
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary); transition: all 0.15s;
+}
+.login-modal-close:hover { color: var(--text); background: var(--bg-hover); }
+.login-modal-title { margin: 0 0 20px; font-size: 18px; font-weight: 700; }
+.login-tabs { display: flex; gap: 4px; margin-bottom: 20px; background: var(--bg-elev-1); padding: 3px; border-radius: 10px; }
+.login-tab {
+  padding: 6px 16px; border-radius: 8px; font-size: 13px; font-weight: 500;
+  color: var(--text-secondary); transition: all 0.15s;
+}
+.login-tab:hover { color: var(--text); }
+.login-tab.active { background: var(--accent); color: #fff; }
+/* 扫码 */
+.login-qr-content { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+/* 表单 */
+.login-form { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.login-input {
+  width: 100%; height: 38px; padding: 0 12px; border-radius: 8px;
+  background: var(--bg-elev-1); border: 1px solid var(--border);
+  color: var(--text); font-size: 13px; transition: border-color 0.15s;
+}
+.login-input:focus { outline: none; border-color: var(--accent); }
+.login-input::placeholder { color: var(--text-tertiary); }
+.captcha-row { display: flex; gap: 8px; }
+.captcha-input { flex: 1; }
+.captcha-btn {
+  padding: 0 14px; border-radius: 8px; font-size: 12px;
+  background: var(--bg-elev-1); border: 1px solid var(--border);
+  color: var(--text-secondary); transition: all 0.15s; white-space: nowrap;
+}
+.captcha-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.captcha-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.login-submit {
+  margin-top: 6px; height: 40px; border-radius: 10px;
+  background: var(--accent); color: #fff; font-size: 14px; font-weight: 600;
+  transition: all 0.15s;
+}
+.login-submit:hover:not(:disabled) { opacity: 0.9; }
+.login-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+.login-error { margin: 12px 0 0; font-size: 12px; color: #ff4d4f; text-align: center; }
+/* 弹窗动画 */
+.login-modal-enter-active, .login-modal-leave-active { transition: opacity 0.2s; }
+.login-modal-enter-from, .login-modal-leave-to { opacity: 0; }
+.login-modal-enter-active .login-modal, .login-modal-leave-active .login-modal {
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.login-modal-enter-from .login-modal, .login-modal-leave-to .login-modal {
+  transform: scale(0.92);
+}
 
 /* Window controls (rightmost) */
 .win-ctrls {
