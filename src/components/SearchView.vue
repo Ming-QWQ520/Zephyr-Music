@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { searchSuggest, neteaseSongToSong, songDetail } from "@/api/netease";
+import { searchSongs, neteaseSongToSong, songDetail } from "@/api/netease";
 import { pickLocalAudioFiles } from "@/api/localMusic";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
@@ -24,17 +24,16 @@ async function runSearch(kw: string) {
   loading.value = true;
   errorMsg.value = "";
   try {
-    // type=pc 返回完整 songs 数组（type=mobile 只返回 allMatch）
-    const res = await searchSuggest(trimmed, "pc");
+    // 使用 /search 接口（返回更多结果，含 artists/album/duration）
+    const res = await searchSongs(trimmed, 50);
     const songs = res.result?.songs || [];
     if (songs.length === 0) {
-      log.warn("searchview", "no songs in result", { resultKeys: res.result ? Object.keys(res.result) : [] });
       results.value = [];
       errorMsg.value = "没有找到结果，换个关键词试试";
     } else {
       results.value = songs.map(neteaseSongToSong);
       log.info("searchview", "search done", { kw: trimmed, count: results.value.length, hasPic: results.value.filter(s => s.pic).length });
-      // searchSuggest 返回的 album 没有 picUrl，用 songDetail 补充封面
+      // /search 返回的 album 没有 picUrl，用 songDetail 批量补充封面
       const needCover = results.value.filter(s => !s.pic && s.neteaseId);
       if (needCover.length > 0) {
         log.info("searchview", "fetching covers via songDetail", { count: needCover.length });
@@ -45,7 +44,6 @@ async function runSearch(kw: string) {
             const picUrl = ds.al?.picUrl || ds.album?.picUrl || "";
             if (picUrl && ds.id) detailMap.set(ds.id, picUrl);
           }
-          // 更新 results 中的封面
           for (const s of results.value) {
             if (!s.pic && s.neteaseId && detailMap.has(s.neteaseId)) {
               s.pic = detailMap.get(s.neteaseId)!;
