@@ -4,6 +4,7 @@ import { usePlayerStore } from "@/stores/player";
 import { useSettings } from "@/components/SettingsPanel.vue";
 import { formatTime } from "@/composables/utils";
 import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser } from "@/api/netease";
+import type { Song } from "@/types";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
@@ -139,6 +140,42 @@ const volHover = ref(false);
 // 播放队列弹窗
 const showQueuePopup = ref(false);
 const queueList = computed(() => store.queue);
+const queueLoading = ref(false);
+
+/** 打开播放队列弹窗（先转圈1秒） */
+function toggleQueuePopup() {
+  if (showQueuePopup.value) {
+    showQueuePopup.value = false;
+    return;
+  }
+  // 先显示转圈
+  queueLoading.value = true;
+  showQueuePopup.value = true;
+  // 1秒后显示列表
+  setTimeout(() => { queueLoading.value = false; }, 1000);
+}
+
+// 播放队列右键菜单
+const queueCtxMenu = ref<{ visible: boolean; x: number; y: number; song: Song | null; idx: number }>({ visible: false, x: 0, y: 0, song: null, idx: -1 });
+function onQueueContextMenu(e: MouseEvent, song: Song, idx: number) {
+  queueCtxMenu.value = { visible: true, x: e.clientX, y: e.clientY, song, idx };
+}
+function closeQueueCtxMenu() { queueCtxMenu.value.visible = false; }
+function queueCtxPlay() {
+  const { song, idx } = queueCtxMenu.value;
+  if (song && idx >= 0) { store.currentIndex = idx; store.setPlaying(true); store.loadLyrics(song); }
+  closeQueueCtxMenu();
+}
+function queueCtxPlayNext() {
+  const { song } = queueCtxMenu.value;
+  if (song) store.playNext(song);
+  closeQueueCtxMenu();
+}
+function queueCtxRemove() {
+  const { idx } = queueCtxMenu.value;
+  if (idx >= 0) store.removeFromQueue(idx);
+  closeQueueCtxMenu();
+}
 
 // 鼠标滚轮调节音量：向上增大，向下减小
 function onVolWheel(e: WheelEvent) {
@@ -152,7 +189,7 @@ function onVolWheel(e: WheelEvent) {
   volHover.value = true;
 }
 
-// 点击外部关闭音质弹窗和播放队列弹窗
+// 点击外部关闭音质弹窗、播放队列弹窗和右键菜单
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
   if (levelPopupOpen.value && target && !target.closest(".level-wrap")) {
@@ -160,6 +197,9 @@ function onDocClick(e: MouseEvent) {
   }
   if (showQueuePopup.value && target && !target.closest(".center-block") && !target.closest(".queue-popup")) {
     showQueuePopup.value = false;
+  }
+  if (queueCtxMenu.value.visible && target && !target.closest(".ctx-menu")) {
+    closeQueueCtxMenu();
   }
 }
 onMounted(() => { document.addEventListener("click", onDocClick); });
@@ -210,7 +250,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         <button class="ctrl-btn" :disabled="!store.hasNext" title="下一首" @click.stop="store.next()">
           <Icon name="next" :size="20" />
         </button>
-        <button class="ctrl-btn" :class="{ active: showQueuePopup }" title="播放队列" @click.stop="showQueuePopup = !showQueuePopup">
+        <button class="ctrl-btn" :class="{ active: showQueuePopup }" title="播放队列" @click.stop="toggleQueuePopup">
           <Icon name="list" :size="18" />
         </button>
       </div>
@@ -266,16 +306,21 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <Icon name="close" :size="18" />
         </button>
       </header>
-      <div class="qp-list nice-scroll">
+      <!-- 加载中转圈 -->
+      <div v-if="queueLoading" class="qp-loading">
+        <div class="spinner" />
+      </div>
+      <div v-else class="qp-list nice-scroll">
         <button
           v-for="(s, idx) in queueList"
           :key="s.id"
           class="qp-item"
           :class="{ active: s.id === store.currentSong?.id }"
           @click="() => { store.currentIndex = idx; store.setPlaying(true); const song = store.queue[idx]; if (song) store.loadLyrics(song); }"
+          @contextmenu.prevent="onQueueContextMenu($event, s, idx)"
         >
           <div class="qp-cover">
-            <img v-if="s.pic" :src="s.pic" :alt="s.name" referrerpolicy="no-referrer" />
+            <img v-if="s.pic" :src="s.pic" :alt="s.name" referrerpolicy="no-referrer" loading="lazy" />
             <Icon v-else name="music" :size="14" />
           </div>
           <div class="qp-meta">
@@ -286,6 +331,17 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </button>
       </div>
     </aside>
+  </Transition>
+
+  <!-- 播放队列右键菜单 -->
+  <Transition name="ctx-fade">
+    <div v-if="queueCtxMenu.visible && queueCtxMenu.song"
+      class="ctx-menu" :style="{ left: queueCtxMenu.x + 'px', top: queueCtxMenu.y + 'px' }" @click.stop>
+      <button class="ctx-item" @click="queueCtxPlay"><Icon name="play" :size="14" /><span>播放</span></button>
+      <button class="ctx-item" @click="queueCtxPlayNext"><Icon name="next" :size="14" /><span>下一首播放</span></button>
+      <div class="ctx-divider" />
+      <button class="ctx-item ctx-danger" @click="queueCtxRemove"><Icon name="trash" :size="14" /><span>从列表中移除</span></button>
+    </div>
   </Transition>
 </template>
 
@@ -458,4 +514,18 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 /* 从右侧滑入动画 */
 .queue-slide-enter-active, .queue-slide-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s; }
 .queue-slide-enter-from, .queue-slide-leave-to { transform: translateX(100%); opacity: 0; }
+
+/* 队列加载转圈 */
+.qp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
+.qp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+/* 右键菜单 */
+.ctx-menu { position: fixed; z-index: 500; min-width: 170px; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 4px; }
+.ctx-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--text); text-align: left; transition: background 0.1s; }
+.ctx-item:hover { background: var(--bg-hover); color: var(--accent); }
+.ctx-danger { color: var(--text-secondary); }
+.ctx-danger:hover { color: #ff4d4f; background: rgba(255,77,79,0.1); }
+.ctx-divider { height: 1px; background: var(--border); margin: 4px 8px; }
+.ctx-fade-enter-active, .ctx-fade-leave-active { transition: opacity 0.12s, transform 0.12s; }
+.ctx-fade-enter-from, .ctx-fade-leave-to { opacity: 0; transform: scale(0.95); }
 </style>

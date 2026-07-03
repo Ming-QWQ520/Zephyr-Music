@@ -849,7 +849,9 @@ export function neteaseSongToSong(s: NeteaseSong): import("@/types").Song {
   const album = raw.al || raw.album;
   const durationSec = ((raw.dt || raw.duration || 0) / 1000);
   // 封面：优先 album.picUrl，回退到直接 picUrl
-  const picUrl = album?.picUrl || raw.picUrl || "";
+  // 添加 ?param=200x200 获取 200x200 缩略图（列表/播放栏用，减少流量）
+  let picUrl = album?.picUrl || raw.picUrl || "";
+  if (picUrl && !picUrl.includes("?param=")) picUrl += "?param=200x200";
   return {
     id: `ne_${raw.id}`,
     name: raw.name,

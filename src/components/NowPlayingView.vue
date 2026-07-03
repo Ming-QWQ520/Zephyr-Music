@@ -300,7 +300,16 @@ onUnmounted(() => {
 // ----- Layout state -----
 const showSettings = ref(false);
 const showQueue = ref(false);
+const queueLoading = ref(false);
 const topbarVisible = ref(false);
+
+/** 切换播放列表面板（先转圈1秒） */
+function toggleQueue() {
+  if (showQueue.value) { showQueue.value = false; return; }
+  queueLoading.value = true;
+  showQueue.value = true;
+  setTimeout(() => { queueLoading.value = false; }, 1000);
+}
 let hideTopbarTimer: ReturnType<typeof setTimeout> | null = null;
 
 function onMouseMove(e: MouseEvent) {
@@ -1122,7 +1131,7 @@ const queueList = computed(() => store.queue);
               class="ctrl-btn"
               :class="{ active: showQueue }"
               title="播放列表"
-              @click="showQueue = !showQueue"
+              @click="toggleQueue"
             >
               <Icon name="list" :size="20" />
             </button>
@@ -1217,7 +1226,10 @@ const queueList = computed(() => store.queue);
             <Icon name="close" :size="18" />
           </button>
         </header>
-        <div class="qp-list nice-scroll">
+        <div v-if="queueLoading" class="qp-loading">
+          <div class="spinner" />
+        </div>
+        <div v-else class="qp-list nice-scroll">
           <button
             v-for="(s, idx) in queueList"
             :key="s.id"
@@ -1226,7 +1238,7 @@ const queueList = computed(() => store.queue);
             @click="() => { store.currentIndex = idx; store.setPlaying(true); const song = store.queue[idx]; if (song) store.loadLyrics(song); }"
           >
             <div class="cover">
-              <img v-if="s.pic" :src="s.pic" :alt="s.name" referrerpolicy="no-referrer" />
+              <img v-if="s.pic" :src="s.pic" :alt="s.name" referrerpolicy="no-referrer" loading="lazy" />
               <Icon v-else name="music" :size="14" />
             </div>
             <div class="meta">
@@ -1754,6 +1766,8 @@ const queueList = computed(() => store.queue);
   padding: 12px;
   box-shadow: -16px 0 40px rgba(0, 0, 0, 0.4);
 }
+.qp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
+.qp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .queue-slide-enter-active,
 .queue-slide-leave-active {
   transition: transform 0.32s var(--ease-out), opacity 0.32s var(--ease-out);

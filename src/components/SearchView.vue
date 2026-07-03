@@ -53,7 +53,8 @@ async function runSearch(kw: string) {
           const detailRes = await songDetail(needCover.map(s => s.neteaseId!));
           const detailMap = new Map<number, string>();
           for (const ds of (detailRes.songs || [])) {
-            const picUrl = ds.al?.picUrl || ds.album?.picUrl || "";
+            let picUrl = ds.al?.picUrl || ds.album?.picUrl || "";
+            if (picUrl && !picUrl.includes("?param=")) picUrl += "?param=200x200";
             if (picUrl && ds.id) detailMap.set(ds.id, picUrl);
           }
           for (const s of results.value) {
