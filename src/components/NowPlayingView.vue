@@ -490,7 +490,7 @@ const MAX_INTERLUDE_PX = 0; // interludes collapse to 0 height
 const activeIndex = computed(() => store.activeLyricIndex);
 
 // 逐字歌词：计算当前活动行已唱进度
-// 使用 requestAnimationFrame 实现逐帧平滑更新（不依赖 currentTime 轮询）
+// 使用 requestAnimationFrame + 直接读取 <audio>.currentTime 实现真正逐帧平滑
 const sungWordCount = computed(() => {
   const idx = activeIndex.value;
   if (idx < 0) return 0;
@@ -505,36 +505,78 @@ const sungWordCount = computed(() => {
   return count;
 });
 
-/** 擦除进度百分比（rAF 逐帧更新，确保平滑） */
-const wipePercent = ref(0);
+/** 每个字符的擦除进度数组 (0~1)，rAF 逐帧更新 */
+const charProgress = ref<number[]>([]);
 let wipeRAF = 0;
+
+/** 直接从 <audio> 元素读取 currentTime（比 store 更频繁，真正逐帧） */
+function getAudioTime(): number {
+  const audio = document.querySelector("audio");
+  if (audio && isFinite(audio.currentTime)) return audio.currentTime;
+  return store.currentTime;
+}
+
 function updateWipe() {
   const idx = activeIndex.value;
-  if (idx < 0) { wipePercent.value = 0; wipeRAF = requestAnimationFrame(updateWipe); return; }
-  const line = parsedLyrics.value[idx];
-  if (!line || !line.words || line.words.length === 0) { wipePercent.value = 0; wipeRAF = requestAnimationFrame(updateWipe); return; }
-  // 使用音频元素的实时 currentTime（比 store 更新更频繁）
-  const t = store.currentTime;
-  // 按字符数加权计算进度（更精确的擦除位置）
-  let sungChars = 0;
-  let totalChars = 0;
+  const line = (idx >= 0) ? parsedLyrics.value[idx] : null;
+  if (!line || !line.words || line.words.length === 0) {
+    if (charProgress.value.length !== 0) charProgress.value = [];
+    wipeRAF = requestAnimationFrame(updateWipe);
+    return;
+  }
+  const t = getAudioTime();
+  // 构建每个字符的进度数组
+  const progresses: number[] = [];
   for (const w of line.words) {
-    const wLen = w.text.length || 1;
-    totalChars += wLen;
+    const chars = [...w.text]; // 支持多字节字符
     if (t >= w.start + w.duration) {
       // 已唱完
-      sungChars += wLen;
+      for (let i = 0; i < chars.length; i++) progresses.push(1);
     } else if (t >= w.start) {
-      // 正在唱
-      const progress = Math.max(0, Math.min(1, (t - w.start) / w.duration));
-      sungChars += wLen * progress;
+      // 正在唱：按字符在词内的位置分配进度
+      const wordProgress = Math.max(0, Math.min(1, (t - w.start) / w.duration));
+      for (let i = 0; i < chars.length; i++) {
+        // 每个字符在词内的起止比例
+        const charStart = i / chars.length;
+        const charEnd = (i + 1) / chars.length;
+        if (wordProgress >= charEnd) {
+          progresses.push(1);
+        } else if (wordProgress > charStart) {
+          progresses.push((wordProgress - charStart) / (charEnd - charStart));
+        } else {
+          progresses.push(0);
+        }
+      }
+    } else {
+      // 未开始
+      for (let i = 0; i < chars.length; i++) progresses.push(0);
     }
   }
-  wipePercent.value = Math.max(0, Math.min(100, (sungChars / totalChars) * 100));
+  charProgress.value = progresses;
   wipeRAF = requestAnimationFrame(updateWipe);
 }
 onMounted(() => { wipeRAF = requestAnimationFrame(updateWipe); });
 onUnmounted(() => { if (wipeRAF) cancelAnimationFrame(wipeRAF); });
+
+/** 构建 linear-gradient 的 color stops，每个字符独立进度 */
+const wipeGradient = computed(() => {
+  const progresses = charProgress.value;
+  if (progresses.length === 0) return "";
+  const n = progresses.length;
+  const stops: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = progresses[i];
+    const startPct = (i / n) * 100;
+    const endPct = ((i + 1) / n) * 100;
+    const boundaryPct = startPct + (endPct - startPct) * p;
+    // 已唱部分白色，未唱部分半透明
+    stops.push(`#fff ${startPct}%`);
+    stops.push(`#fff ${boundaryPct}%`);
+    stops.push(`rgba(255,255,255,0.3) ${boundaryPct}%`);
+    stops.push(`rgba(255,255,255,0.3) ${endPct}%`);
+  }
+  return `linear-gradient(to right, ${stops.join(", ")})`;
+});
 
 // ----- Lyric engine: each line's absolute transform -----
 const lyricWrapRef = ref<HTMLDivElement | null>(null);
@@ -1221,7 +1263,7 @@ const queueList = computed(() => store.queue);
                   'text-glow': settings.textGlow,
                   'yrc-wipe': line.words && line.words.length > 0 && idx === activeIndex,
                 }"
-                :style="line.words && line.words.length > 0 && idx === activeIndex ? { '--wipe-percent': wipePercent + '%' } : {}"
+                :style="line.words && line.words.length > 0 && idx === activeIndex ? { background: wipeGradient } : {}"
               >
                 <template v-if="line.words && line.words.length > 0">
                   {{ line.text }}
@@ -1733,15 +1775,8 @@ const queueList = computed(() => store.queue);
   font-weight: inherit;
   text-align: inherit;
 }
-/* 逐字歌词平滑擦除效果（像进度条从左到右） */
+/* 逐字歌词平滑擦除效果（每字符独立进度，从左到右） */
 .lyric-text.yrc-wipe {
-  background: linear-gradient(
-    to right,
-    #fff 0%,
-    #fff var(--wipe-percent, 0%),
-    rgba(255, 255, 255, 0.3) calc(var(--wipe-percent, 0%) + 0.5%),
-    rgba(255, 255, 255, 0.3) 100%
-  );
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
