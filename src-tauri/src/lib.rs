@@ -180,10 +180,7 @@ fn create_island_window(app: tauri::AppHandle) -> Result<(), String> {
         .skip_taskbar(true)
         .resizable(false)
         .shadow(false)
-        .position(
-            (tauri::PhysicalPosition::<f64>::new(0.0, 0.0)).x as f64, // will be set by frontend
-            10.0,
-        )
+        .position(100.0, 10.0) // 初始位置，前端会调整到居中
         .build()
         .map_err(|e| format!("Failed to create island window: {}", e))?;
     Ok(())

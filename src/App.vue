@@ -390,8 +390,8 @@ onUnmounted(() => {
     <audio ref="audioRef" preload="auto" />
 
     <!-- Titlebar -->
-    <header class="titlebar tauri-drag">
-      <div class="tb-left">
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="tb-left" data-tauri-drag-region>
         <div class="brand">
           <img src="/favicon.svg" alt="Zephyr" class="brand-icon" />
           <span class="brand-name">Zephyr</span>
@@ -405,7 +405,7 @@ onUnmounted(() => {
 
       <div class="tb-right">
         <!-- 网易云登录/头像 -->
-        <div class="ne-auth tauri-no-drag">
+        <div class="ne-auth">
           <button v-if="!neLoggedIn" class="ne-login-btn" @click="openLoginModal">
             <Icon name="music" :size="14" />
             <span>登录</span>
@@ -436,13 +436,13 @@ onUnmounted(() => {
           </Transition>
         </div>
 
-        <button class="icon-btn tauri-no-drag" :class="{ active: showNowPlaying }" title="全屏播放器" @click="toggleNowPlaying">
+        <button class="icon-btn" :class="{ active: showNowPlaying }" title="全屏播放器" @click="toggleNowPlaying">
           <Icon name="expand" :size="16" />
         </button>
-        <button class="icon-btn tauri-no-drag" title="设置" @click="showSettings = true">
+        <button class="icon-btn" title="设置" @click="showSettings = true">
           <img src="/icons/settings.svg" alt="settings" class="settings-icon" />
         </button>
-        <div class="win-ctrls tauri-no-drag">
+        <div class="win-ctrls">
           <button class="win-btn" title="最小化" @click="minimizeWindow"><Icon name="minimize" :size="14" /></button>
           <button class="win-btn" title="最大化" @click="toggleMaximize"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/></svg></button>
           <button class="win-btn win-close" title="关闭" @click="closeWindow"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>

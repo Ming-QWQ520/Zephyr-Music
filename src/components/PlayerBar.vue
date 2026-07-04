@@ -208,8 +208,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 <template>
   <footer class="player-bar" :class="{ 'has-song': store.currentSong }">
-    <!-- Left: vinyl cover + meta -->
-    <div class="left-block" @click="openFullscreen">
+    <!-- Left: vinyl cover + meta - 点击任意位置进入播放界面 -->
+    <div class="left-block" @click="openFullscreen" style="cursor: pointer;">
       <div class="vinyl" :class="{ spinning: store.isPlaying && settings.coverRotation }">
         <div class="cover">
           <img v-if="store.currentSong?.pic" :src="store.currentSong.pic" :alt="store.currentSong.name" referrerpolicy="no-referrer" />

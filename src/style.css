@@ -250,10 +250,10 @@ img {
   overflow: hidden;
 }
 
-/* Tauri drag region */
+/* Tauri drag region - Tauri v2 uses data-tauri-drag-region attribute */
 .tauri-drag {
-  -webkit-app-region: drag;
+  /* Fallback for Tauri v1, no-op in v2 */
 }
 .tauri-no-drag {
-  -webkit-app-region: no-drag;
+  /* Fallback for Tauri v1, no-op in v2 */
 }
