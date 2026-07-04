@@ -376,14 +376,15 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 .center-block { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
 .controls { display: flex; align-items: center; gap: 4px; }
-.ctrl-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 8px; color: var(--text-secondary); transition: color 0.15s, background 0.15s, transform 0.12s; }
+.ctrl-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-full); color: var(--text-secondary); transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out); }
 .ctrl-btn:hover { color: var(--text); background: var(--bg-hover); }
-.ctrl-btn:active { transform: scale(0.92); }
-.ctrl-btn.active { color: var(--accent); }
-.ctrl-btn[disabled] { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
-/* 播放按钮：无圆形白色背景 */
-.ctrl-btn.play { width: 38px; height: 38px; color: var(--text); margin: 0 4px; }
-.ctrl-btn.play:hover { color: #fff; transform: scale(1.05); }
+.ctrl-btn:active { background: var(--bg-active); }
+.ctrl-btn.active { color: var(--accent); background: var(--accent-soft); }
+.ctrl-btn[disabled] { opacity: 0.38; cursor: not-allowed; pointer-events: none; }
+/* MD3 FAB-style play button */
+.ctrl-btn.play { width: 48px; height: 48px; color: var(--on-accent); background: var(--accent); margin: 0 4px; }
+.ctrl-btn.play:hover { color: var(--on-accent); background: var(--accent-strong); transform: scale(1.05); }
+.ctrl-btn.play:active { transform: scale(0.95); }
 
 .progress-row { display: flex; align-items: center; gap: 8px; width: 100%; max-width: 520px; }
 .progress { flex: 1; }

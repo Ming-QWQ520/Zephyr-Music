@@ -14,7 +14,7 @@ import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import ToastContainer from "@/components/ToastContainer.vue";
 import Icon from "@/components/Icon.vue";
-import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo, loginCellphone, loginEmail, captchaSent } from "@/api/netease";
+import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo, userLevel, loginCellphone, loginEmail, captchaSent } from "@/api/netease";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
@@ -38,6 +38,7 @@ let qrKeyVal = "";
 // VIP 信息和总听歌时长
 const neVipInfo = ref<{ isVip: boolean; redVipLevel: number; expireText: string } | null>(null);
 const neListenTotal = ref<string>("");
+const neUserLevel = ref<{ level: number; nowLogin: number; nowListen: number; nextLogin: number; nextListen: number; progress: number } | null>(null);
 
 // 登录弹窗
 const showLoginModal = ref(false);
@@ -59,18 +60,18 @@ function formatListenTime(seconds: number): string {
   return `${m}分钟`;
 }
 
-/** 加载 VIP 信息和总听歌时长 */
+/** 加载 VIP 信息、总听歌时长和用户等级 */
 async function loadVipAndListenData() {
   const user = _cachedUser.value;
   if (!user) return;
-  // 并行获取 VIP 信息和总听歌时长
-  const [vipRes, listenRes] = await Promise.allSettled([
+  // 并行获取 VIP 信息、总听歌时长和用户等级
+  const [vipRes, listenRes, levelRes] = await Promise.allSettled([
     vipInfo(user.userId),
     listenDataTotal(),
+    userLevel(),
   ]);
   try {
     if (vipRes.status === "fulfilled") {
-      // vipInfo 可能被 apiGet 解包，也可能没有
       const d = vipRes.value.data || vipRes.value as any;
       if (d) {
         const isVip = d.isVip ?? (d.associator?.vipLevel ?? 0) > 0;
@@ -86,6 +87,21 @@ async function loadVipAndListenData() {
     const time = listenRes.value.data?.totalDuration || listenRes.value.totalDuration || listenRes.value.data?.time || listenRes.value.time || 0;
     neListenTotal.value = formatListenTime(time);
     log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
+  }
+  if (levelRes.status === "fulfilled") {
+    const d = levelRes.value.data || levelRes.value as any;
+    if (d && d.level != null) {
+      const progress = d.nextLogin > 0 ? Math.min(100, Math.round((d.nowLogin / d.nextLogin) * 100)) : 100;
+      neUserLevel.value = {
+        level: d.level,
+        nowLogin: d.nowLogin || 0,
+        nowListen: d.nowListen || 0,
+        nextLogin: d.nextLogin || 0,
+        nextListen: d.nextListen || 0,
+        progress,
+      };
+      log.info("app", "user level loaded", { level: d.level, progress });
+    }
   }
 }
 
@@ -131,7 +147,7 @@ function stopNeQrCheck() { if (qrCheckTimer) { clearInterval(qrCheckTimer); qrCh
 async function doNeLogout() {
   try { await logout(); } catch { /* ignore */ }
   neLoggedIn.value = false; neUser.value = null;
-  neVipInfo.value = null; neListenTotal.value = "";
+  neVipInfo.value = null; neListenTotal.value = ""; neUserLevel.value = null;
   showLoginDropdown.value = false;
   qrStatus.value = "idle"; qrCodeImg.value = "";
 }
@@ -346,6 +362,20 @@ onUnmounted(() => {
                 <Icon name="clock" :size="13" />
                 <span>总听歌时长: {{ neListenTotal }}</span>
               </div>
+              <!-- 用户等级 -->
+              <div v-if="neUserLevel" class="ne-level-info">
+                <div class="ne-level-header">
+                  <span class="ne-level-badge">Lv.{{ neUserLevel.level }}</span>
+                  <span class="ne-level-progress-text">{{ neUserLevel.progress }}%</span>
+                </div>
+                <div class="ne-level-bar">
+                  <div class="ne-level-bar-fill" :style="{ width: neUserLevel.progress + '%' }"></div>
+                </div>
+                <div class="ne-level-detail">
+                  <span>登录 {{ neUserLevel.nowLogin }}/{{ neUserLevel.nextLogin }}天</span>
+                  <span>听歌 {{ neUserLevel.nowListen }}/{{ neUserLevel.nextListen }}首</span>
+                </div>
+              </div>
               <button class="ne-logout-btn" @click="doNeLogout">退出登录</button>
             </div>
           </Transition>
@@ -558,8 +588,16 @@ onUnmounted(() => {
 /* 总听歌时长 */
 .ne-listen-total { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 11px; color: var(--text-tertiary); margin-bottom: 10px; }
 .ne-listen-total :deep(.icon-svg) { opacity: 0.7; }
-.ne-logout-btn { padding: 6px 16px; border-radius: 6px; font-size: 12px; color: var(--text-tertiary); border: 1px solid var(--border); }
-.ne-logout-btn:hover { color: var(--accent); border-color: var(--accent); }
+.ne-logout-btn { padding: 6px 16px; border-radius: var(--radius-full); font-size: 12px; color: var(--text-tertiary); border: 1px solid var(--border); transition: all 0.15s; }
+.ne-logout-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+/* 用户等级 */
+.ne-level-info { width: 100%; margin-bottom: 10px; padding: 10px 12px; background: var(--bg-elev-1); border-radius: var(--radius-sm); }
+.ne-level-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.ne-level-badge { font-size: 13px; font-weight: 700; color: var(--accent); }
+.ne-level-progress-text { font-size: 11px; color: var(--text-tertiary); }
+.ne-level-bar { width: 100%; height: 4px; background: var(--bg-elev-3); border-radius: 2px; overflow: hidden; margin-bottom: 6px; }
+.ne-level-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.3s var(--ease-out); }
+.ne-level-detail { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-tertiary); }
 .dropdown-enter-active, .dropdown-leave-active { transition: all 0.15s; }
 .dropdown-enter-from, .dropdown-leave-to { opacity: 0; transform: translateY(-8px); }
 @keyframes spin { to { transform: rotate(360deg); } }

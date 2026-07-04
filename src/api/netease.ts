@@ -299,6 +299,43 @@ export async function vipInfo(uid?: number): Promise<{
   return r;
 }
 
+/** 获取用户等级信息（/user/level）
+ *  包含当前登录天数、听歌次数、下一等级需要的登录天数和听歌次数、当前等级进度
+ */
+export async function userLevel(): Promise<{
+  code: number;
+  data?: {
+    level?: number;
+    now?: number;
+    nextLogin?: number;
+    nextListen?: number;
+    nowLogin?: number;
+    nowListen?: number;
+    percentage?: number;
+  };
+  full?: boolean;
+  level?: number;
+  nowLogin?: number;
+  nowListen?: number;
+  nextLogin?: number;
+  nextListen?: number;
+}> {
+  log.info("netease-api-music", "→ userLevel()");
+  const r = await apiGet("/user/level");
+  const d = r.data || r;
+  log.info("netease-api-music", "← userLevel result", {
+    code: r.code,
+    level: d.level,
+    nowLogin: d.nowLogin,
+    nowListen: d.nowListen,
+    nextLogin: d.nextLogin,
+    nextListen: d.nextListen,
+    keys: r && typeof r === "object" ? Object.keys(r) : [],
+    rawPreview: truncateForLog(r, 500),
+  });
+  return r;
+}
+
 // ===== 共享状态（缓存，避免重复请求导致风控）=====
 import { ref } from "vue";
 

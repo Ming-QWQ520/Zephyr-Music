@@ -117,7 +117,7 @@ watch(() => _cachedUser.value, (user) => {
 .sidebar {
   position: relative; width: var(--sidebar-w); flex-shrink: 0;
   display: flex; flex-direction: column; gap: 4px;
-  padding: 12px 8px; background: var(--bg-elev-1);
+  padding: 12px 12px; background: var(--bg-elev-1);
   border-right: 1px solid var(--border); overflow: hidden;
 }
 .sb-section { display: flex; flex-direction: column; gap: 2px; }
@@ -126,25 +126,14 @@ watch(() => _cachedUser.value, (user) => {
   color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.5px;
 }
 .sb-item {
-  display: flex; align-items: center; gap: 10px;
-  height: 34px; padding: 0 10px; border-radius: 8px;
-  color: var(--text-secondary); font-size: 13px; font-weight: 500;
-  transition: color 0.15s, background 0.15s; white-space: nowrap;
+  display: flex; align-items: center; gap: 12px;
+  height: 44px; padding: 0 16px; border-radius: var(--radius-full);
+  color: var(--text-secondary); font-size: 14px; font-weight: 500;
+  transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out); white-space: nowrap;
   position: relative;
 }
 .sb-item:hover { color: var(--text); background: var(--bg-hover); }
 .sb-item.active { color: var(--accent); background: var(--accent-soft); }
-.sb-item.active::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
-  height: 18px;
-  background: var(--accent);
-  border-radius: 0 2px 2px 0;
-}
 .sb-playlists { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 4px; }
 .sb-pl-header {
   display: flex; align-items: center; gap: 6px;
@@ -154,8 +143,8 @@ watch(() => _cachedUser.value, (user) => {
 .sb-pl-header .count { margin-left: auto; }
 .sb-pl-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-right: 2px; }
 .sb-pl-item {
-  display: flex; align-items: center; gap: 8px;
-  padding: 5px 8px; border-radius: 6px; transition: background 0.15s;
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px; border-radius: var(--radius-full); transition: background 0.2s var(--ease-out);
   text-align: left; width: 100%; position: relative;
 }
 .sb-pl-item:hover { background: var(--bg-hover); }
