@@ -333,6 +333,14 @@ const showBackBtn = computed(() => {
   return true;
 });
 
+/** 是否显示详情标签页（歌曲/评论/收藏者）
+ *  所有真实歌单（id > 0）都显示，每日推荐(-1)和听歌排行(-2)不显示 */
+const showDetailTabs = computed(() => {
+  if (isRecordView.value) return false;
+  const pid = selectedPlaylistId.value;
+  return pid !== null && pid > 0;
+});
+
 // 右键菜单
 const contextMenu = ref<{ visible: boolean; x: number; y: number; song: Song | null }>({ visible: false, x: 0, y: 0, song: null });
 const ctxSongLiked = ref(false);  // 当前右键歌曲是否已喜欢
@@ -547,8 +555,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </button>
       </header>
 
-      <!-- 详情标签页（仅非听歌排行时显示） -->
-      <div v-if="!isRecordView && selectedPlaylistId !== null && selectedPlaylistId > 0" class="detail-tabs">
+      <!-- 详情标签页（所有真实歌单都显示：歌曲/评论/收藏者） -->
+      <div v-if="showDetailTabs" class="detail-tabs">
         <button class="detail-tab" :class="{ active: activeDetailTab === 'songs' }" @click="activeDetailTab = 'songs'">歌曲</button>
         <button class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="activeDetailTab = 'comments'">
           评论<span v-if="playlistDynamic"> ({{ formatCount(playlistDynamic.commentCount) }})</span>
@@ -722,8 +730,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .dynamic-info { font-size: 11px; opacity: 0.7; }
 .playlist-desc { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; line-height: 1.5; max-width: 500px; }
 /* 详情标签页 */
-.detail-tabs { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--border); }
-.detail-tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
+.detail-tabs { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--border); min-height: 40px; align-items: stretch; flex-shrink: 0; }
+.detail-tab { padding: 10px 16px; font-size: 14px; font-weight: 500; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; margin-bottom: -1px; }
 .detail-tab:hover { color: var(--text); }
 .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 /* 评论 */
