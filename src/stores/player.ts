@@ -53,7 +53,7 @@ export const usePlayerStore = defineStore("player", {
       currentTime: session?.currentTime || 0, duration: 0, buffered: 0,
       volume: session?.volume ?? 0.8, muted: session?.muted ?? false, shuffle: false, repeat: "off",
       lyrics: [], activeLyricIndex: -1,
-      currentView: "netease", searchKeyword: "", history: [],
+      currentView: "recommend", searchKeyword: "", history: [],
       previousView: null,
       pendingPlaylistId: null,
       sourcePlaylistId: null,

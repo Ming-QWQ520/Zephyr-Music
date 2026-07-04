@@ -71,7 +71,11 @@ async function loadData() {
   loggedIn.value = true;
   const pls = await getCachedPlaylists();
   playlists.value = pls;
-  if (playlists.value.length > 0) await selectPlaylist(playlists.value[0]);
+  // 只有在没有 pendingPlaylistId 时才自动加载第一个歌单
+  // 否则等 pendingPlaylistId watch 处理
+  if (store.pendingPlaylistId === null && playlists.value.length > 0 && currentPlaylistSongs.value.length === 0) {
+    await selectPlaylist(playlists.value[0]);
+  }
 }
 
 async function selectPlaylist(pl: NeteasePlaylist) {
@@ -367,7 +371,7 @@ watch(() => store.pendingPlaylistId, (id) => {
     }
     store.pendingPlaylistId = null;
   }
-});
+}, { immediate: true });
 
 onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 </script>
