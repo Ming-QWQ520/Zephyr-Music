@@ -300,37 +300,40 @@ export async function vipInfo(uid?: number): Promise<{
 }
 
 /** 获取用户等级信息（/user/level）
- *  包含当前登录天数、听歌次数、下一等级需要的登录天数和听歌次数、当前等级进度
+ *  返回字段：
+ *  - level: 当前等级
+ *  - nowLoginCount: 当前登录天数
+ *  - nextLoginCount: 升级所需登录天数
+ *  - nowPlayCount: 当前听歌次数
+ *  - nextPlayCount: 升级所需听歌次数
+ *  - progress: 当前进度 (0~1)
  */
 export async function userLevel(): Promise<{
   code: number;
   data?: {
     level?: number;
-    now?: number;
-    nextLogin?: number;
-    nextListen?: number;
-    nowLogin?: number;
-    nowListen?: number;
-    percentage?: number;
+    nowLoginCount?: number;
+    nextLoginCount?: number;
+    nowPlayCount?: number;
+    nextPlayCount?: number;
+    progress?: number;
+    info?: string;
+    userId?: number;
+    full?: boolean;
   };
-  full?: boolean;
-  level?: number;
-  nowLogin?: number;
-  nowListen?: number;
-  nextLogin?: number;
-  nextListen?: number;
 }> {
   log.info("netease-api-music", "→ userLevel()");
   const r = await apiGet("/user/level");
-  const d = r.data || r;
+  const d = r.data;
   log.info("netease-api-music", "← userLevel result", {
     code: r.code,
-    level: d.level,
-    nowLogin: d.nowLogin,
-    nowListen: d.nowListen,
-    nextLogin: d.nextLogin,
-    nextListen: d.nextListen,
-    keys: r && typeof r === "object" ? Object.keys(r) : [],
+    level: d?.level,
+    nowLoginCount: d?.nowLoginCount,
+    nextLoginCount: d?.nextLoginCount,
+    nowPlayCount: d?.nowPlayCount,
+    nextPlayCount: d?.nextPlayCount,
+    progress: d?.progress,
+    keys: d ? Object.keys(d) : [],
     rawPreview: truncateForLog(r, 500),
   });
   return r;

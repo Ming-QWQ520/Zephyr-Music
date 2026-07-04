@@ -38,7 +38,7 @@ let qrKeyVal = "";
 // VIP 信息和总听歌时长
 const neVipInfo = ref<{ isVip: boolean; redVipLevel: number; expireText: string } | null>(null);
 const neListenTotal = ref<string>("");
-const neUserLevel = ref<{ level: number; nowLogin: number; nowListen: number; nextLogin: number; nextListen: number; progress: number } | null>(null);
+const neUserLevel = ref<{ level: number; nowLoginCount: number; nextLoginCount: number; nowPlayCount: number; nextPlayCount: number; progress: number; needLogin: number; needPlay: number } | null>(null);
 
 // 登录弹窗
 const showLoginModal = ref(false);
@@ -89,18 +89,20 @@ async function loadVipAndListenData() {
     log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
   }
   if (levelRes.status === "fulfilled") {
-    const d = levelRes.value.data || levelRes.value as any;
+    const d = levelRes.value.data;
     if (d && d.level != null) {
-      const progress = d.nextLogin > 0 ? Math.min(100, Math.round((d.nowLogin / d.nextLogin) * 100)) : 100;
+      const progress = Math.round((d.progress || 0) * 100);
       neUserLevel.value = {
         level: d.level,
-        nowLogin: d.nowLogin || 0,
-        nowListen: d.nowListen || 0,
-        nextLogin: d.nextLogin || 0,
-        nextListen: d.nextListen || 0,
+        nowLoginCount: d.nowLoginCount || 0,
+        nextLoginCount: d.nextLoginCount || 0,
+        nowPlayCount: d.nowPlayCount || 0,
+        nextPlayCount: d.nextPlayCount || 0,
         progress,
+        needLogin: Math.max(0, (d.nextLoginCount || 0) - (d.nowLoginCount || 0)),
+        needPlay: Math.max(0, (d.nextPlayCount || 0) - (d.nowPlayCount || 0)),
       };
-      log.info("app", "user level loaded", { level: d.level, progress });
+      log.info("app", "user level loaded", { level: d.level, progress, needLogin: neUserLevel.value.needLogin, needPlay: neUserLevel.value.needPlay });
     }
   }
 }
@@ -372,8 +374,8 @@ onUnmounted(() => {
                   <div class="ne-level-bar-fill" :style="{ width: neUserLevel.progress + '%' }"></div>
                 </div>
                 <div class="ne-level-detail">
-                  <span>登录 {{ neUserLevel.nowLogin }}/{{ neUserLevel.nextLogin }}天</span>
-                  <span>听歌 {{ neUserLevel.nowListen }}/{{ neUserLevel.nextListen }}首</span>
+                  <span>还需登录 {{ neUserLevel.needLogin }} 天</span>
+                  <span>还需听歌 {{ neUserLevel.needPlay }} 首</span>
                 </div>
               </div>
               <button class="ne-logout-btn" @click="doNeLogout">退出登录</button>

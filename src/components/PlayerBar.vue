@@ -376,7 +376,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 .center-block { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
 .controls { display: flex; align-items: center; gap: 4px; }
-.ctrl-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-full); color: var(--text-secondary); transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out); }
+.ctrl-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-sm); color: var(--text-secondary); transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out); }
 .ctrl-btn:hover { color: var(--text); background: var(--bg-hover); }
 .ctrl-btn:active { background: var(--bg-active); }
 .ctrl-btn.active { color: var(--accent); background: var(--accent-soft); }

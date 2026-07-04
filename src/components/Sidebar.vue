@@ -127,7 +127,7 @@ watch(() => _cachedUser.value, (user) => {
 }
 .sb-item {
   display: flex; align-items: center; gap: 12px;
-  height: 44px; padding: 0 16px; border-radius: var(--radius-full);
+  height: 44px; padding: 0 16px; border-radius: var(--radius-sm);
   color: var(--text-secondary); font-size: 14px; font-weight: 500;
   transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out); white-space: nowrap;
   position: relative;
@@ -144,7 +144,7 @@ watch(() => _cachedUser.value, (user) => {
 .sb-pl-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; padding-right: 2px; }
 .sb-pl-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 6px 12px; border-radius: var(--radius-full); transition: background 0.2s var(--ease-out);
+  padding: 6px 12px; border-radius: var(--radius-sm); transition: background 0.2s var(--ease-out);
   text-align: left; width: 100%; position: relative;
 }
 .sb-pl-item:hover { background: var(--bg-hover); }
