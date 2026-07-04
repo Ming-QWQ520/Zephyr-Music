@@ -390,8 +390,10 @@ onUnmounted(() => {
     <audio ref="audioRef" preload="auto" />
 
     <!-- Titlebar -->
-    <header class="titlebar" data-tauri-drag-region>
-      <div class="tb-left" data-tauri-drag-region>
+    <header class="titlebar">
+      <!-- Drag region as background layer (doesn't block child clicks) -->
+      <div class="titlebar-drag-bg" data-tauri-drag-region></div>
+      <div class="tb-left">
         <div class="brand">
           <img src="/favicon.svg" alt="Zephyr" class="brand-icon" />
           <span class="brand-name">Zephyr</span>
@@ -555,6 +557,16 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--border);
   gap: 8px;
   flex-shrink: 0;
+  position: relative;
+}
+.titlebar-drag-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.titlebar > *:not(.titlebar-drag-bg) {
+  position: relative;
+  z-index: 1;
 }
 .tb-left {
   display: flex;

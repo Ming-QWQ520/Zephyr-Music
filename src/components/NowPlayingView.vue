@@ -1069,7 +1069,8 @@ const queueList = computed(() => store.queue);
     </div>
 
     <!-- Topbar: center song info is ALWAYS visible; only side icons fade in/out -->
-    <header class="topbar" data-tauri-drag-region>
+    <header class="topbar">
+      <div class="topbar-drag-bg" data-tauri-drag-region></div>
       <!-- Left icons (collapse, etc.) — hide when mouse leaves topbar -->
       <div class="topbar-side topbar-left" :class="{ visible: topbarVisible || showSettings || showQueue }">
         <button class="icon-btn" title="收起到迷你播放器" @click="close">
@@ -1402,6 +1403,15 @@ const queueList = computed(() => store.queue);
   gap: 12px;
   height: var(--titlebar-h);
   padding: 0 16px;
+}
+.topbar-drag-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.topbar > *:not(.topbar-drag-bg) {
+  position: relative;
+  z-index: 1;
 }
 .topbar-title {
   flex: 1;
