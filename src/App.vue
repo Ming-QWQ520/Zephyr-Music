@@ -90,7 +90,8 @@ async function loadVipAndListenData() {
     log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
   }
   if (levelRes.status === "fulfilled") {
-    const d = levelRes.value.data;
+    // apiGet 可能已解包 data，也可能没有
+    const d = levelRes.value.data || levelRes.value as any;
     if (d && d.level != null) {
       const progress = Math.round((d.progress || 0) * 100);
       neUserLevel.value = {
@@ -154,6 +155,9 @@ async function doNeLogout() {
   showLoginDropdown.value = false;
   qrStatus.value = "idle"; qrCodeImg.value = "";
 }
+
+/** 关闭用户下拉框（点击外部时调用） */
+function closeDropdown() { showLoginDropdown.value = false; }
 
 /** 打开登录弹窗 */
 function openLoginModal() {
@@ -272,6 +276,15 @@ onMounted(() => {
   // 全局禁用原生右键菜单（返回、刷新、另存为、打印等）
   document.addEventListener("contextmenu", (e) => {
     e.preventDefault();
+  });
+  // 点击外部关闭用户下拉框
+  document.addEventListener("click", (e) => {
+    if (showLoginDropdown.value) {
+      const target = e.target as HTMLElement;
+      if (target && !target.closest(".ne-auth")) {
+        closeDropdown();
+      }
+    }
   });
   // 恢复上次播放的歌曲：重新获取 URL 和歌词
   const song = store.currentSong;

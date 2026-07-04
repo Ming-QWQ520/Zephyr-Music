@@ -10,6 +10,10 @@ const store = usePlayerStore();
 const keyword = ref("");
 const inputRef = ref<HTMLInputElement | null>(null);
 
+function goBack() {
+  store.goBackView();
+}
+
 function onKeydown(ev: KeyboardEvent) {
   if (ev.key === "Enter") {
     ev.preventDefault();
@@ -55,6 +59,9 @@ function onGlobalKeydown(ev: KeyboardEvent) {
 
 <template>
   <div class="search-bar">
+    <button v-if="store.canGoBack" class="back-btn" @click="goBack" title="返回">
+      <Icon name="chevronLeft" :size="18" />
+    </button>
     <Icon name="search" :size="16" class="search-icon" />
     <input
       ref="inputRef"
@@ -86,6 +93,8 @@ function onGlobalKeydown(ev: KeyboardEvent) {
 }
 .search-bar:focus-within { border-color: var(--accent); }
 .search-icon { color: var(--text-tertiary); flex-shrink: 0; }
+.back-btn { width: 28px; height: 28px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: color 0.15s, background 0.15s; flex-shrink: 0; }
+.back-btn:hover { color: var(--text); background: var(--bg-hover); }
 .search-input {
   flex: 1;
   background: transparent;

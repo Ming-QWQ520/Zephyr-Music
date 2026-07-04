@@ -206,9 +206,9 @@ async function loadPlaylistById(id: number) {
   loadingSongs.value = false;
 }
 
-/** 返回推荐页 */
+/** 返回上一页 */
 function goBack() {
-  store.setView("recommend");
+  store.goBackView();
 }
 
 /** 是否显示返回按钮（榜单等非用户歌单时显示） */

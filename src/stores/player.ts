@@ -39,6 +39,10 @@ interface State {
   pendingPlaylistId: number | null;
   /** 当前播放队列来源的歌单 ID（用于听歌打卡 sourceid） */
   sourcePlaylistId: number | null;
+  /** 视图历史栈，用于返回上一页 */
+  viewHistory: ViewKey[];
+  /** 当前歌单 ID 历史，用于返回上一歌单 */
+  playlistIdHistory: (number | null)[];
 }
 
 export const usePlayerStore = defineStore("player", {
@@ -53,6 +57,8 @@ export const usePlayerStore = defineStore("player", {
       previousView: null,
       pendingPlaylistId: null,
       sourcePlaylistId: null,
+      viewHistory: [],
+      playlistIdHistory: [],
     } as State;
   },
   getters: {
@@ -61,9 +67,25 @@ export const usePlayerStore = defineStore("player", {
     hasPrev(s): boolean { return s.queue.length > 0 && (s.repeat === "all" || s.currentIndex > 0); },
     progress(s): number { return s.duration > 0 ? Math.min(1, s.currentTime / s.duration) : 0; },
     bufferedFrac(s): number { return s.duration > 0 ? Math.min(1, s.buffered / s.duration) : 0; },
+    canGoBack(s): boolean { return s.viewHistory.length > 0; },
   },
   actions: {
-    setView(v: ViewKey) { this.currentView = v; },
+    setView(v: ViewKey) {
+      // 记录历史（避免重复入栈）
+      if (this.currentView !== v) {
+        this.viewHistory.push(this.currentView);
+        if (this.viewHistory.length > 20) this.viewHistory.shift();
+      }
+      this.currentView = v;
+    },
+    /** 返回上一页 */
+    goBackView() {
+      if (this.viewHistory.length > 0) {
+        this.currentView = this.viewHistory.pop()!;
+      } else {
+        this.currentView = "recommend";
+      }
+    },
     openFullscreenPlayer() { if (this.currentView !== "nowplaying") this.previousView = this.currentView; this.currentView = "nowplaying"; },
     closeFullscreenPlayer() { this.currentView = this.previousView || "search"; this.previousView = null; },
     setSearchKeyword(kw: string) { this.searchKeyword = kw; },
