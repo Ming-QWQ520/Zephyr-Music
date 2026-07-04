@@ -62,6 +62,8 @@ const ICONS: Record<string, string> = {
   equalizer: `<path d="M6 4v8M6 16v4M12 4v3M12 11v9M18 4v9M18 17v3" stroke-linecap="round"/><circle cx="6" cy="12" r="2" /><circle cx="12" cy="8" r="2" /><circle cx="18" cy="14" r="2" />`,
   grip: `<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>`,
   check: `<path d="m5 12 5 5L20 7" stroke-linecap="round" stroke-linejoin="round"/>`,
+  link: `<path d="M9 15l6-6M9 11l2-2a3 3 0 0 1 4 4l-2 2M15 13l-2 2a3 3 0 0 1-4-4l2-2" stroke-linecap="round" stroke-linejoin="round"/>`,
+  wallpaper: `<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 17 4-4 3 3 3-2 6 5" stroke-linecap="round" stroke-linejoin="round"/>`,
 };
 
 const inner = computed(() => ICONS[props.name] || "");

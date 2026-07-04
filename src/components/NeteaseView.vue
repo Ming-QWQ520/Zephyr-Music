@@ -253,6 +253,10 @@ const commentOffset = ref(0);
 const subsOffset = ref(0);
 const loadingComments = ref(false);
 const loadingSubs = ref(false);
+/** 评论总数 */
+const commentTotal = ref(0);
+/** 收藏者总数 */
+const subsTotal = ref(0);
 
 /** 后台加载歌单详情动态、评论、收藏者 */
 async function loadPlaylistExtra(id: number) {
@@ -276,7 +280,7 @@ async function loadPlaylistExtra(id: number) {
 
 async function loadComments(id: number, reset = false) {
   if (loadingComments.value) return;
-  if (reset) { commentOffset.value = 0; playlistComments.value = []; }
+  if (reset) { commentOffset.value = 0; playlistComments.value = []; commentTotal.value = 0; }
   loadingComments.value = true;
   try {
     const res = await commentPlaylist(id, 20, commentOffset.value);
@@ -284,19 +288,21 @@ async function loadComments(id: number, reset = false) {
     if (reset) playlistComments.value = newComments;
     else playlistComments.value.push(...(res.comments || []));
     commentOffset.value += 20;
+    if (res.total) commentTotal.value = res.total;
   } catch { /* ignore */ }
   loadingComments.value = false;
 }
 
 async function loadSubscribers(id: number, reset = false) {
   if (loadingSubs.value) return;
-  if (reset) { subsOffset.value = 0; playlistSubs.value = []; }
+  if (reset) { subsOffset.value = 0; playlistSubs.value = []; subsTotal.value = 0; }
   loadingSubs.value = true;
   try {
     const res = await playlistSubscribers(id, 20, subsOffset.value);
     if (reset) playlistSubs.value = res.subscribers || [];
     else playlistSubs.value.push(...(res.subscribers || []));
     subsOffset.value += 20;
+    if (res.total) subsTotal.value = res.total;
   } catch { /* ignore */ }
   loadingSubs.value = false;
 }
@@ -560,9 +566,11 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       <div v-if="showDetailTabs" class="detail-tabs">
         <button class="detail-tab" :class="{ active: activeDetailTab === 'songs' }" @click="activeDetailTab = 'songs'">歌曲</button>
         <button class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="activeDetailTab = 'comments'">
-          评论<span v-if="playlistDynamic"> ({{ formatCount(playlistDynamic.commentCount) }})</span>
+          评论<span v-if="commentTotal"> ({{ formatCount(commentTotal) }})</span>
         </button>
-        <button class="detail-tab" :class="{ active: activeDetailTab === 'subscribers' }" @click="activeDetailTab = 'subscribers'">收藏者</button>
+        <button class="detail-tab" :class="{ active: activeDetailTab === 'subscribers' }" @click="activeDetailTab = 'subscribers'">
+          收藏者<span v-if="subsTotal"> ({{ formatCount(subsTotal) }})</span>
+        </button>
       </div>
 
       <div class="songs-body nice-scroll" @scroll="onDetailScroll">
@@ -573,6 +581,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </div>
         <!-- 评论列表 -->
         <div v-else-if="activeDetailTab === 'comments'" class="comments-list">
+          <div v-if="commentTotal" class="list-total-header">共 {{ formatCount(commentTotal) }} 条评论</div>
           <div v-if="loadingComments && !playlistComments.length" class="songs-loading">加载评论中...</div>
           <div v-else-if="!playlistComments.length" class="songs-empty"><p>暂无评论</p></div>
           <div v-for="c in playlistComments" :key="c.commentId" class="comment-item">
@@ -588,6 +597,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </div>
         <!-- 收藏者列表 -->
         <div v-else-if="activeDetailTab === 'subscribers'" class="subs-list">
+          <div v-if="subsTotal" class="list-total-header">共 {{ formatCount(subsTotal) }} 人收藏</div>
           <div v-if="loadingSubs && !playlistSubs.length" class="songs-loading">加载收藏者中...</div>
           <div v-else-if="!playlistSubs.length" class="songs-empty"><p>暂无收藏者</p></div>
           <div v-for="s in playlistSubs" :key="s.userId" class="sub-item">
@@ -737,6 +747,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 /* 评论 */
 .comments-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+.list-total-header { font-size: 12px; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 .comment-item { display: flex; gap: 12px; }
 .comment-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
 .comment-body { flex: 1; min-width: 0; }

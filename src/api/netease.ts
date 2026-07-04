@@ -538,7 +538,7 @@ export interface PlaylistComment {
   user: { userId: number; nickname: string; avatarUrl: string };
 }
 export async function commentPlaylist(id: number, limit = 20, offset = 0): Promise<{
-  code: number; total?: number; hotComments?: PlaylistComment[]; comments?: PlaylistComment[]; more?: boolean;
+  code: number; total?: number; hotComments?: PlaylistComment[]; comments?: PlaylistComment[]; more?: boolean; moreHot?: boolean;
 }> {
   const params: Record<string, string | number> = { id, limit, offset };
   log.info(TAG, "commentPlaylist()", { id, limit, offset });
@@ -552,7 +552,7 @@ export interface PlaylistSubscriber {
   userId: number; nickname: string; avatarUrl: string; signature?: string;
 }
 export async function playlistSubscribers(id: number, limit = 20, offset = 0): Promise<{
-  code: number; subscribers?: PlaylistSubscriber[]; more?: boolean;
+  code: number; total?: number; subscribers?: PlaylistSubscriber[]; more?: boolean;
 }> {
   log.info(TAG, "playlistSubscribers()", { id, limit, offset });
   const r = await apiGet("/playlist/subscribers", { id, limit, offset });

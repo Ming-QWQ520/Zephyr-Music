@@ -13,18 +13,37 @@ import RecommendView from "@/components/RecommendView.vue";
 import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
+import HomeSettingsPanel from "@/components/HomeSettingsPanel.vue";
+import { useHomeSettings } from "@/composables/useHomeSettings";
 import ToastContainer from "@/components/ToastContainer.vue";
 import Icon from "@/components/Icon.vue";
 import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo, userLevel, loginCellphone, loginEmail, captchaSent } from "@/api/netease";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
+const { settings: homeSettings } = useHomeSettings();
 
 const audioRef = ref<HTMLAudioElement | null>(null);
 useAudioBinding(audioRef);
 
-const showSettings = ref(false);
+/** 首页设置弹窗（独立于播放界面设置） */
+const showHomeSettings = ref(false);
 const showNowPlaying = computed(() => store.currentView === "nowplaying");
+
+/** 是否启用壁纸背景 */
+const hasWallpaper = computed(() =>
+  homeSettings.bgType === "image" && !!homeSettings.bgImage && !showNowPlaying.value
+);
+/** 壁纸样式 */
+const wallpaperStyle = computed(() => ({
+  backgroundImage: `url('${homeSettings.bgImage}')`,
+  backgroundSize: homeSettings.bgFit,
+  backgroundPosition: "center",
+  backgroundRepeat: "no-repeat",
+  filter: `blur(${homeSettings.bgBlur}px) brightness(${1 - homeSettings.bgDim / 100})`,
+}));
+/** 壁纸遮罩层样式（用于加深可读性） */
+const hasSidebarTransparent = computed(() => hasWallpaper.value && homeSettings.transparentSidebar);
 
 // ===== 网易云登录状态（标题栏显示）=====
 const neLoggedIn = ref(false);
@@ -330,9 +349,13 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="app-shell" :data-color-mode="settings.colorMode">
+  <div class="app-shell" :class="{ 'has-wallpaper': hasWallpaper, 'transparent-sidebar': hasSidebarTransparent }" :data-color-mode="settings.colorMode">
     <!-- Hidden audio element for online streaming (local files use Rodio) -->
     <audio ref="audioRef" preload="auto" />
+
+    <!-- 全屏壁纸背景层（覆盖整个窗口，包括标题栏） -->
+    <div v-if="hasWallpaper" class="wallpaper-layer" :style="wallpaperStyle"></div>
+    <div v-if="hasWallpaper" class="wallpaper-overlay"></div>
 
     <!-- Titlebar -->
     <header class="titlebar" data-tauri-drag-region>
@@ -398,7 +421,7 @@ onUnmounted(() => {
         <button class="icon-btn" :class="{ active: showNowPlaying }" title="全屏播放器" @click="toggleNowPlaying">
           <Icon name="expand" :size="16" />
         </button>
-        <button class="icon-btn" title="设置" @click="showSettings = true">
+        <button class="icon-btn" title="首页设置" @click="showHomeSettings = true">
           <img src="/icons/settings.svg" alt="settings" class="settings-icon" />
         </button>
         <div class="win-ctrls">
@@ -434,8 +457,8 @@ onUnmounted(() => {
       <NowPlayingView v-if="showNowPlaying" />
     </Transition>
 
-    <!-- Settings (modal/fullscreen on home page) -->
-    <SettingsPanel :visible="showSettings" mode="modal" @close="showSettings = false" />
+    <!-- 首页设置弹窗（独立于播放界面设置） -->
+    <HomeSettingsPanel :visible="showHomeSettings" @close="showHomeSettings = false" />
 
     <!-- 登录弹窗 -->
     <Transition name="login-modal">
@@ -503,6 +526,47 @@ onUnmounted(() => {
   background: var(--bg);
   color: var(--text);
   overflow: hidden;
+  position: relative;
+}
+
+/* ----- 全屏壁纸背景层 ----- */
+.wallpaper-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  pointer-events: none;
+  transform: scale(1.05); /* 避免 blur 边缘出现透明边 */
+}
+/* 壁纸遮罩：在壁纸上方叠加一层半透明背景色，保证内容可读性 */
+.wallpaper-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: rgba(18, 18, 22, 0.45);
+  pointer-events: none;
+}
+/* 有壁纸时，标题栏/侧边栏/主视图背景透明，露出壁纸 */
+.app-shell.has-wallpaper .titlebar {
+  background: transparent;
+  border-bottom-color: rgba(255,255,255,0.06);
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+.app-shell.has-wallpaper.transparent-sidebar .app-body > :deep(.sidebar) {
+  background: transparent;
+  backdrop-filter: blur(12px) saturate(1.2);
+}
+.app-shell.has-wallpaper .main-view {
+  background: transparent;
+}
+.app-shell.has-wallpaper .app-body {
+  position: relative;
+  z-index: 1;
+}
+.app-shell.has-wallpaper .titlebar {
+  position: relative;
+  z-index: 2;
 }
 
 /* ----- Titlebar ----- */
