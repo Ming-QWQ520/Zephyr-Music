@@ -33,6 +33,8 @@ const isRecordView = ref(false);
 const playCountMap = ref<Map<string, number>>(new Map());
 /** 当前列表歌曲的喜欢状态集合（neteaseId → liked） */
 const songLikedSet = ref<Set<number>>(new Set());
+/** 是否已启动任何加载（防止 onMounted 的 loadData 与 watch 的 pendingPlaylistId 竞争导致闪烁） */
+const loadInitiated = ref(false);
 
 /** 加载当前列表歌曲的喜欢状态 */
 async function loadSongLikedStatus() {
@@ -71,21 +73,30 @@ async function loadData() {
   loggedIn.value = true;
   const pls = await getCachedPlaylists();
   playlists.value = pls;
-  // 只有在没有 pendingPlaylistId 时才自动加载第一个歌单
-  // 否则等 pendingPlaylistId watch 处理
-  if (store.pendingPlaylistId === null && playlists.value.length > 0 && currentPlaylistSongs.value.length === 0) {
+  // 只有在未启动任何加载时才自动加载第一个歌单
+  // （watch(pendingPlaylistId, immediate) 已在 setup 阶段处理过榜单等场景）
+  if (!loadInitiated.value && playlists.value.length > 0) {
     await selectPlaylist(playlists.value[0]);
   }
 }
 
 async function selectPlaylist(pl: NeteasePlaylist) {
   if (selectedPlaylistId.value === pl.id && currentPlaylistSongs.value.length > 0) return;
+  loadInitiated.value = true;
   isRecordView.value = false;
   playCountMap.value = new Map();
   songLikedSet.value = new Set();
   selectedPlaylistId.value = pl.id;
   selectedPlaylistName.value = pl.name;
   selectedPlaylistCover.value = pl.coverImgUrl || "";
+  // 清空详情数据
+  playlistDesc.value = "";
+  playlistDynamic.value = null;
+  playlistComments.value = [];
+  playlistSubs.value = [];
+  commentOffset.value = 0;
+  subsOffset.value = 0;
+  activeDetailTab.value = "songs";
   loadingSongs.value = true;
   try {
     const res = await playlistTrackAll(pl.id);
@@ -93,10 +104,18 @@ async function selectPlaylist(pl: NeteasePlaylist) {
     loadSongLikedStatus(); // 后台加载喜欢状态
   } catch { currentPlaylistSongs.value = []; }
   loadingSongs.value = false;
+  // 后台加载歌单详情（动态、评论、收藏者）
+  loadPlaylistExtra(pl.id);
+  // 描述需要 playlistDetail 获取（NeteasePlaylist 类型不含 description）
+  playlistDetail(pl.id, 0).then(res => {
+    if (res.playlist?.description) playlistDesc.value = res.playlist.description;
+    else if (pl.creator?.nickname) playlistDesc.value = `by ${pl.creator.nickname}`;
+  }).catch(() => {});
 }
 
 async function loadDailyRecommend() {
   if (selectedPlaylistId.value === -1 && currentPlaylistSongs.value.length > 0) return;
+  loadInitiated.value = true;
   isRecordView.value = false;
   playCountMap.value = new Map();
   songLikedSet.value = new Set();
@@ -134,6 +153,7 @@ function playSong(idx: number) {
 async function loadRecord(type: 0 | 1 = 1) {
   // 如果已经在听歌排行视图且类型相同且已有数据，不重复加载
   if (isRecordView.value && recordType.value === type && currentPlaylistSongs.value.length > 0) return;
+  loadInitiated.value = true;
   log.info("netease-view", "loadRecord() start", { type });
   const user = await getCachedUser();
   if (!user) {
@@ -186,6 +206,7 @@ function getPlayCount(songId: string): number {
 
 /** 通过 playlistDetail 加载歌单/榜单（不在用户歌单列表中的） */
 async function loadPlaylistById(id: number) {
+  loadInitiated.value = true;
   isRecordView.value = false;
   playCountMap.value = new Map();
   songLikedSet.value = new Set();
@@ -205,7 +226,7 @@ async function loadPlaylistById(id: number) {
     if (pl) {
       selectedPlaylistName.value = pl.name || "歌单";
       selectedPlaylistCover.value = pl.coverImgUrl || "";
-      playlistDesc.value = pl.description || (pl.creator as any)?.nickname ? `by ${pl.creator?.nickname}` : "";
+      playlistDesc.value = pl.description || ((pl.creator as any)?.nickname ? `by ${pl.creator?.nickname}` : "");
       // playlistDetail 的 tracks 只有前10首，用 playlistTrackAll 获取全部
       const trackRes = await playlistTrackAll(id);
       currentPlaylistSongs.value = (trackRes.songs || []).map(neteaseSongToSong);
@@ -435,13 +456,12 @@ function onDocClick() { closeContextMenu(); }
 
 onMounted(() => {
   document.addEventListener("click", onDocClick);
-  // 如果有 pendingPlaylistId（从推荐页榜单点击进入），不自动加载第一个歌单
-  // pendingPlaylistId 的 immediate watch 会处理
-  if (store.pendingPlaylistId === null) {
-    loadData();
-  } else {
-    // 只加载歌单列表（侧边栏用），但不自动选中
+  // watch(pendingPlaylistId, immediate) 已在 setup 阶段执行
+  // 若已启动加载（从推荐页榜单进入），只加载侧边栏歌单列表，避免与 loadData 竞争导致闪烁
+  if (loadInitiated.value) {
     loadPlaylistsOnly();
+  } else {
+    loadData();
   }
 });
 
@@ -459,7 +479,8 @@ async function loadPlaylistsOnly() {
 watch(() => _cachedUser.value, (user) => {
   if (user && !loggedIn.value) {
     log.info("netease-view", "user logged in, reloading data");
-    loadPlaylistsOnly();
+    // 登录后加载数据：若已有 pending 加载则只补侧边栏，否则自动选中第一个歌单
+    loadData();
   }
 }, { immediate: true });
 
@@ -527,7 +548,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       </header>
 
       <!-- 详情标签页（仅非听歌排行时显示） -->
-      <div v-if="!isRecordView && showBackBtn" class="detail-tabs">
+      <div v-if="!isRecordView && selectedPlaylistId !== null && selectedPlaylistId > 0" class="detail-tabs">
         <button class="detail-tab" :class="{ active: activeDetailTab === 'songs' }" @click="activeDetailTab = 'songs'">歌曲</button>
         <button class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="activeDetailTab = 'comments'">
           评论<span v-if="playlistDynamic"> ({{ formatCount(playlistDynamic.commentCount) }})</span>
