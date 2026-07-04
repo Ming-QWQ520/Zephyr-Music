@@ -13,6 +13,8 @@ import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import ToastContainer from "@/components/ToastContainer.vue";
+import DynamicIsland from "@/components/DynamicIsland.vue";
+import DesktopLyrics from "@/components/DesktopLyrics.vue";
 import Icon from "@/components/Icon.vue";
 import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo, loginCellphone, loginEmail, captchaSent } from "@/api/netease";
 
@@ -441,6 +443,12 @@ onUnmounted(() => {
         </div>
       </div>
     </Transition>
+
+    <!-- 桌面灵动岛 -->
+    <DynamicIsland />
+
+    <!-- 桌面歌词 -->
+    <DesktopLyrics />
 
     <!-- Toast 通知容器（右下角） -->
     <ToastContainer />
