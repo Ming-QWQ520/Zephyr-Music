@@ -1,8 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { useAudioBinding } from "@/composables/useAudioBinding";
 import { log } from "@/composables/logger";
+import { useNeteaseAuth } from "@/composables/useNeteaseAuth";
+import { useNeteaseUser } from "@/composables/useNeteaseUser";
+import { useWindowControls } from "@/composables/useWindowControls";
+import { useHomeSettings } from "@/composables/useHomeSettings";
 import Sidebar from "@/components/Sidebar.vue";
 import GlobalSearchBar from "@/components/GlobalSearchBar.vue";
 import SearchView from "@/components/SearchView.vue";
@@ -15,14 +19,29 @@ import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import HomeSettingsPanel from "@/components/HomeSettingsPanel.vue";
 import WindowControls from "@/components/WindowControls.vue";
-import { useHomeSettings } from "@/composables/useHomeSettings";
 import ToastContainer from "@/components/ToastContainer.vue";
 import Icon from "@/components/Icon.vue";
-import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo, userLevel, loginCellphone, loginEmail, captchaSent } from "@/api/netease";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
 const { settings: homeSettings } = useHomeSettings();
+
+// 网易云登录逻辑（高内聚：登录相关状态+操作集中在一个 composable）
+const {
+  neLoggedIn, neUser, showLoginDropdown,
+  qrCodeImg, qrStatus, qrMessage,
+  showLoginModal, loginTab, loginLoading, loginError,
+  phoneForm, captchaSentFlag, emailForm,
+  checkNeLogin, startNeLogin, doNeLogout,
+  closeDropdown, openLoginModal, closeLoginModal,
+  doPhoneLogin, doSendCaptcha, doEmailLogin,
+} = useNeteaseAuth();
+
+// 网易云用户信息（VIP/等级/听歌时长）
+const { neVipInfo, neListenTotal, neUserLevel } = useNeteaseUser();
+
+// 窗口控制（最小化/最大化/关闭）
+const { minimizeWindow, toggleMaximize, closeWindow } = useWindowControls();
 
 const audioRef = ref<HTMLAudioElement | null>(null);
 useAudioBinding(audioRef);
@@ -41,244 +60,6 @@ function onWallpaperError() {
 }
 /** 壁纸遮罩层样式（用于加深可读性） */
 const hasSidebarTransparent = computed(() => hasWallpaper.value && homeSettings.transparentSidebar);
-
-// ===== 网易云登录状态（标题栏显示）=====
-const neLoggedIn = ref(false);
-const neUser = ref<{ nickname: string; avatarUrl: string } | null>(null);
-const showLoginDropdown = ref(false);
-const qrCodeImg = ref("");
-const qrStatus = ref<"idle" | "loading" | "waiting" | "expired">("idle");
-const qrMessage = ref("");
-let qrCheckTimer: ReturnType<typeof setInterval> | null = null;
-let qrKeyVal = "";
-
-// VIP 信息和总听歌时长
-const neVipInfo = ref<{ isVip: boolean; redVipLevel: number; expireText: string } | null>(null);
-const neListenTotal = ref<string>("");
-const neUserLevel = ref<{ level: number; nowLoginCount: number; nextLoginCount: number; nowPlayCount: number; nextPlayCount: number; progress: number; needLogin: number; needPlay: number } | null>(null);
-
-// 登录弹窗
-const showLoginModal = ref(false);
-const loginTab = ref<"qr" | "phone" | "email">("qr");
-const loginLoading = ref(false);
-const loginError = ref("");
-// 手机登录表单
-const phoneForm = ref({ phone: "", password: "", captcha: "", countrycode: "" });
-const captchaSentFlag = ref(false);
-// 邮箱登录表单
-const emailForm = ref({ email: "", password: "" });
-
-/** 格式化总听歌时长（秒 → x小时y分钟） */
-function formatListenTime(seconds: number): string {
-  if (!seconds || seconds <= 0) return "0分钟";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  if (h > 0) return `${h}小时${m}分钟`;
-  return `${m}分钟`;
-}
-
-/** 加载 VIP 信息、总听歌时长和用户等级 */
-async function loadVipAndListenData() {
-  const user = _cachedUser.value;
-  if (!user) return;
-  // 并行获取 VIP 信息、总听歌时长和用户等级
-  const [vipRes, listenRes, levelRes] = await Promise.allSettled([
-    vipInfo(user.userId),
-    listenDataTotal(),
-    userLevel(),
-  ]);
-  try {
-    if (vipRes.status === "fulfilled") {
-      const d = vipRes.value.data || vipRes.value as any;
-      if (d) {
-        const isVip = d.isVip ?? (d.associator?.vipLevel ?? 0) > 0;
-        const level = d.redVipLevel || 0;
-        const expire = d.associator?.expireTime || d.musicPackage?.expireTime;
-        const expireText = expire ? new Date(expire).toLocaleDateString("zh-CN") : "";
-        neVipInfo.value = { isVip, redVipLevel: level, expireText };
-        log.info("app", "VIP info loaded", { isVip, level, expireText });
-      }
-    }
-  } catch (e) { log.warn("app", "load vip failed", { error: String(e) }); }
-  if (listenRes.status === "fulfilled") {
-    const time = listenRes.value.data?.totalDuration || listenRes.value.totalDuration || listenRes.value.data?.time || listenRes.value.time || 0;
-    neListenTotal.value = formatListenTime(time);
-    log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
-  }
-  if (levelRes.status === "fulfilled") {
-    // apiGet 可能已解包 data，也可能没有
-    const d = levelRes.value.data || levelRes.value as any;
-    if (d && d.level != null) {
-      const progress = Math.round((d.progress || 0) * 100);
-      neUserLevel.value = {
-        level: d.level,
-        nowLoginCount: d.nowLoginCount || 0,
-        nextLoginCount: d.nextLoginCount || 0,
-        nowPlayCount: d.nowPlayCount || 0,
-        nextPlayCount: d.nextPlayCount || 0,
-        progress,
-        needLogin: Math.max(0, (d.nextLoginCount || 0) - (d.nowLoginCount || 0)),
-        needPlay: Math.max(0, (d.nextPlayCount || 0) - (d.nowPlayCount || 0)),
-      };
-      log.info("app", "user level loaded", { level: d.level, progress, needLogin: neUserLevel.value.needLogin, needPlay: neUserLevel.value.needPlay });
-    }
-  }
-}
-
-async function checkNeLogin() {
-  if (!getCookie()) return;
-  const user = await getCachedUser();
-  if (user) {
-    neLoggedIn.value = true;
-    neUser.value = { nickname: user.nickname, avatarUrl: user.avatarUrl };
-    // 登录后加载 VIP 信息和总听歌时长
-    loadVipAndListenData();
-  }
-}
-
-async function startNeLogin() {
-  qrStatus.value = "loading"; qrMessage.value = "正在生成二维码..."; qrCodeImg.value = "";
-  try {
-    const keyRes = await qrKey();
-    if (!keyRes.unikey) { qrMessage.value = "生成失败"; qrStatus.value = "idle"; return; }
-    qrKeyVal = keyRes.unikey;
-    const createRes = await qrCreate(qrKeyVal);
-    if (!createRes.qrimg) { qrMessage.value = "生成失败"; qrStatus.value = "idle"; return; }
-    qrCodeImg.value = createRes.qrimg;
-    qrStatus.value = "waiting"; qrMessage.value = "请用网易云音乐 App 扫码";
-    stopNeQrCheck();
-    qrCheckTimer = setInterval(async () => {
-      try {
-        const res = await qrCheck(qrKeyVal);
-        if (res.code === 800) { qrStatus.value = "expired"; qrMessage.value = "二维码已过期"; stopNeQrCheck(); }
-        else if (res.code === 802) { qrMessage.value = "已扫码，请确认"; }
-        else if (res.code === 803) {
-          if (res.cookie) setCookie(res.cookie);
-          stopNeQrCheck();
-          await checkNeLogin();
-          showLoginDropdown.value = false;
-        }
-      } catch { /* ignore */ }
-    }, 2000);
-  } catch (e) { qrMessage.value = "出错: " + String(e); qrStatus.value = "idle"; }
-}
-function stopNeQrCheck() { if (qrCheckTimer) { clearInterval(qrCheckTimer); qrCheckTimer = null; } }
-
-async function doNeLogout() {
-  try { await logout(); } catch { /* ignore */ }
-  neLoggedIn.value = false; neUser.value = null;
-  neVipInfo.value = null; neListenTotal.value = ""; neUserLevel.value = null;
-  showLoginDropdown.value = false;
-  qrStatus.value = "idle"; qrCodeImg.value = "";
-}
-
-/** 关闭用户下拉框（点击外部时调用） */
-function closeDropdown() { showLoginDropdown.value = false; }
-
-/** 打开登录弹窗 */
-function openLoginModal() {
-  showLoginModal.value = true;
-  loginError.value = "";
-  if (qrStatus.value === "idle") startNeLogin();
-}
-
-/** 关闭登录弹窗 */
-function closeLoginModal() {
-  showLoginModal.value = false;
-  stopNeQrCheck();
-  loginError.value = "";
-}
-
-/** 手机登录 */
-async function doPhoneLogin() {
-  if (!phoneForm.value.phone) { loginError.value = "请输入手机号"; return; }
-  if (!phoneForm.value.password && !phoneForm.value.captcha) { loginError.value = "请输入密码或验证码"; return; }
-  loginLoading.value = true;
-  loginError.value = "";
-  try {
-    const res = await loginCellphone({
-      phone: phoneForm.value.phone,
-      password: phoneForm.value.captcha ? undefined : phoneForm.value.password,
-      countrycode: phoneForm.value.countrycode || undefined,
-      captcha: phoneForm.value.captcha || undefined,
-    });
-    if (res.code === 200 && res.cookie) {
-      setCookie(res.cookie);
-      await checkNeLogin();
-      closeLoginModal();
-    } else {
-      loginError.value = `登录失败 (code: ${res.code})`;
-    }
-  } catch (e) {
-    loginError.value = String(e instanceof Error ? e.message : e);
-  } finally {
-    loginLoading.value = false;
-  }
-}
-
-/** 发送手机验证码 */
-async function doSendCaptcha() {
-  if (!phoneForm.value.phone) { loginError.value = "请输入手机号"; return; }
-  try {
-    await captchaSent(phoneForm.value.phone, phoneForm.value.countrycode || undefined);
-    captchaSentFlag.value = true;
-    loginError.value = "验证码已发送";
-  } catch (e) {
-    loginError.value = String(e instanceof Error ? e.message : e);
-  }
-}
-
-/** 邮箱登录 */
-async function doEmailLogin() {
-  if (!emailForm.value.email) { loginError.value = "请输入邮箱"; return; }
-  if (!emailForm.value.password) { loginError.value = "请输入密码"; return; }
-  loginLoading.value = true;
-  loginError.value = "";
-  try {
-    const res = await loginEmail(emailForm.value.email, emailForm.value.password);
-    if (res.code === 200 && res.cookie) {
-      setCookie(res.cookie);
-      await checkNeLogin();
-      closeLoginModal();
-    } else {
-      loginError.value = `登录失败 (code: ${res.code})`;
-    }
-  } catch (e) {
-    loginError.value = String(e instanceof Error ? e.message : e);
-  } finally {
-    loginLoading.value = false;
-  }
-}
-
-async function minimizeWindow() {
-  try {
-    const mod = await import("@tauri-apps/api/window");
-    const w = mod.getCurrentWindow?.() ?? (mod as any).window?.();
-    if (w) await w.minimize();
-  } catch (e) {
-    log.warn("app", "minimize failed", { error: String(e) });
-  }
-}
-
-async function toggleMaximize() {
-  try {
-    const mod = await import("@tauri-apps/api/window");
-    const w = mod.getCurrentWindow?.() ?? (mod as any).window?.();
-    if (w) await w.toggleMaximize();
-  } catch (e) {
-    log.warn("app", "toggleMaximize failed", { error: String(e) });
-  }
-}
-
-async function closeWindow() {
-  try {
-    const mod = await import("@tauri-apps/api/window");
-    const w = mod.getCurrentWindow?.() ?? (mod as any).window?.();
-    if (w) await w.close();
-  } catch (e) {
-    log.warn("app", "close failed", { error: String(e) });
-  }
-}
 
 function toggleNowPlaying() {
   if (showNowPlaying.value) store.closeFullscreenPlayer();
@@ -307,13 +88,10 @@ onMounted(() => {
   if (song) {
     log.info("app", "restoring last song", { name: song.name, hasUrl: !!song.url, hasLrc: !!song.lrc });
     if (song.source === "netease" && song.neteaseId) {
-      // 清除缓存的 URL 和歌词（URL 可能过期，yrcText/tlyricText 未持久化）
-      // 强制重新获取，确保逐字歌词和翻译完整
       song.url = "";
       song.lrc = "";
       (song as any).yrcText = "";
       (song as any).tlyricText = "";
-      // 同步清除队列中该歌曲的缓存
       const idx = store.queue.findIndex(s => s.id === song.id);
       if (idx >= 0) {
         store.queue[idx].url = "";
@@ -321,21 +99,17 @@ onMounted(() => {
         (store.queue[idx] as any).yrcText = "";
         (store.queue[idx] as any).tlyricText = "";
       }
-      // 并行获取 URL 和歌词（不阻塞，后台加载）
       const urlP = store._ensureNeteaseUrl(song);
       const lrcP = store._ensureNeteaseLyrics(song).then(() => {
         if (store.currentSong?.id === song.id) store.loadLyrics(song);
       });
-      store.lyrics = []; // 清空，等歌词加载完显示
+      store.lyrics = [];
       void urlP; void lrcP;
     } else {
-      // 本地歌曲：直接加载歌词
       if (song.lrc) store.loadLyrics(song);
     }
   }
-  // 定期保存会话（每 10 秒）
   sessionTimer = setInterval(() => store.saveSession(), 10000);
-  // 页面关闭前保存
   window.addEventListener("beforeunload", () => store.saveSession());
 });
 let sessionTimer: ReturnType<typeof setInterval> | null = null;
