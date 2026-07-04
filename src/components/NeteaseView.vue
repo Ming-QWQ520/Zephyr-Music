@@ -207,6 +207,7 @@ function getPlayCount(songId: string): number {
 /** 通过 playlistDetail 加载歌单/榜单（不在用户歌单列表中的） */
 async function loadPlaylistById(id: number) {
   loadInitiated.value = true;
+  loggedIn.value = true; // 榜单等公开歌单即使未登录也能查看
   isRecordView.value = false;
   playCountMap.value = new Map();
   songLikedSet.value = new Set();
