@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { useAudioBinding } from "@/composables/useAudioBinding";
 import { log } from "@/composables/logger";
@@ -13,8 +13,6 @@ import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import ToastContainer from "@/components/ToastContainer.vue";
-import DynamicIsland from "@/components/DynamicIsland.vue";
-import DesktopLyrics from "@/components/DesktopLyrics.vue";
 import Icon from "@/components/Icon.vue";
 import { getCookie, getCachedUser, logout, setCookie, qrKey, qrCreate, qrCheck, _cachedUser, listenDataTotal, vipInfo, loginCellphone, loginEmail, captchaSent } from "@/api/netease";
 
@@ -40,6 +38,93 @@ let qrKeyVal = "";
 // VIP 信息和总听歌时长
 const neVipInfo = ref<{ isVip: boolean; redVipLevel: number; expireText: string } | null>(null);
 const neListenTotal = ref<string>("");
+
+// ===== 桌面灵动岛 & 桌面歌词窗口管理 =====
+async function createFloatingWindow(type: "island" | "lyrics") {
+  try {
+    const mod = await import("@tauri-apps/api/core");
+    if (type === "island") await mod.invoke("create_island_window");
+    else await mod.invoke("create_lyrics_window");
+    log.info("app", `created ${type} window`);
+  } catch (e) { log.warn("app", `create ${type} window failed`, { error: String(e) }); }
+}
+async function closeFloatingWindow(type: "island" | "lyrics") {
+  try {
+    const mod = await import("@tauri-apps/api/core");
+    if (type === "island") await mod.invoke("close_island_window");
+    else await mod.invoke("close_lyrics_window");
+    log.info("app", `closed ${type} window`);
+  } catch (e) { log.warn("app", `close ${type} window failed`, { error: String(e) }); }
+}
+
+// 监听设置变化，创建/关闭浮动窗口
+watch(() => settings.dynamicIsland, async (on) => {
+  if (on) await createFloatingWindow("island");
+  else await closeFloatingWindow("island");
+});
+watch(() => settings.desktopLyrics, async (on) => {
+  if (on) await createFloatingWindow("lyrics");
+  else await closeFloatingWindow("lyrics");
+});
+
+// 发送设置给浮动窗口
+watch([
+  () => settings.dynamicIslandShowLyric,
+  () => settings.dynamicIslandCoverRotate,
+  () => settings.dynamicIslandLocked,
+  () => settings.desktopLyricsLocked,
+], () => {
+  emitToFloating("settings-update", {
+    showLyric: settings.dynamicIslandShowLyric,
+    coverRotate: settings.dynamicIslandCoverRotate,
+    locked: settings.dynamicIslandLocked,
+  });
+});
+
+// 向浮动窗口发送播放状态和歌词数据
+async function emitToFloating(event: string, data: any) {
+  try {
+    const mod = await import("@tauri-apps/api/event");
+    if (settings.dynamicIsland) mod.emitTo("island", event, data);
+    if (settings.desktopLyrics) mod.emitTo("desktop-lyrics", event, data);
+  } catch { /* ignore if not in Tauri */ }
+}
+
+// 监听播放状态变化，发送给浮动窗口
+watch(() => store.currentSong, (song) => {
+  emitToFloating("song-changed", song ? {
+    name: song.name, artist: song.artist, pic: song.pic, duration: song.duration,
+    neteaseId: song.neteaseId, source: song.source,
+  } : null);
+});
+watch(() => store.isPlaying, (playing) => { emitToFloating("play-state", { playing }); });
+watch(() => store.currentTime, (t) => { emitToFloating("time-update", { time: t }); });
+watch(() => store.lyrics, (lyrics) => { emitToFloating("lyrics-update", { lyrics }); });
+watch(() => store.activeLyricIndex, (idx) => { emitToFloating("lyric-index", { idx }); });
+
+// 发送逐字歌词数据给浮动窗口
+// 从 NowPlayingView 的 yrcLines 逻辑中获取逐字数据
+// 这里通过 store.currentSong 的 yrcText 提取
+watch(() => store.currentSong, (song) => {
+  const yrcText = (song as any)?.yrcText;
+  if (yrcText) {
+    // 解析 yrc 为 words 数组
+    const words: { start: number; duration: number; text: string }[] = [];
+    for (const raw of yrcText.split("\n")) {
+      const m = raw.match(/^\[(\d+),(\d+)\]/);
+      if (!m) continue;
+      const startTime = parseInt(m[1]) / 1000;
+      const wordRe = /\((\d+),(\d+),\d+\)([^(]+)/g;
+      let wm;
+      while ((wm = wordRe.exec(raw)) !== null) {
+        words.push({ start: parseInt(wm[1]) / 1000, duration: parseInt(wm[2]) / 1000, text: wm[3] });
+      }
+    }
+    emitToFloating("yrc-update", { words });
+  } else {
+    emitToFloating("yrc-update", { words: [] });
+  }
+}, { immediate: true });
 
 // 登录弹窗
 const showLoginModal = ref(false);
@@ -443,12 +528,6 @@ onUnmounted(() => {
         </div>
       </div>
     </Transition>
-
-    <!-- 桌面灵动岛 -->
-    <DynamicIsland />
-
-    <!-- 桌面歌词 -->
-    <DesktopLyrics />
 
     <!-- Toast 通知容器（右下角） -->
     <ToastContainer />

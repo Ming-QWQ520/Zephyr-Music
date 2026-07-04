@@ -4,6 +4,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use chrono::Local;
 use lofty::file::AudioFile;
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 
 struct LogFile(Mutex<Option<String>>);
 
@@ -159,6 +160,76 @@ fn rodio_seek(app: tauri::AppHandle, position: f64) -> Result<(), String> {
     Ok(())
 }
 
+// ===== 桌面灵动岛窗口 =====
+#[tauri::command]
+fn create_island_window(app: tauri::AppHandle) -> Result<(), String> {
+    if app.get_webview_window("island").is_some() {
+        return Ok(()); // 已存在
+    }
+    let url = if cfg!(feature = "custom-protocol") {
+        WebviewUrl::App("island.html".into())
+    } else {
+        WebviewUrl::External("http://localhost:1420/island.html".parse().unwrap())
+    };
+    WebviewWindowBuilder::new(&app, "island", url)
+        .title("Dynamic Island")
+        .inner_size(320.0, 56.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .position(
+            (tauri::PhysicalPosition::<f64>::new(0.0, 0.0)).x as f64, // will be set by frontend
+            10.0,
+        )
+        .build()
+        .map_err(|e| format!("Failed to create island window: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_island_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("island") {
+        win.close().map_err(|e| format!("Failed to close island: {}", e))?;
+    }
+    Ok(())
+}
+
+// ===== 桌面歌词窗口 =====
+#[tauri::command]
+fn create_lyrics_window(app: tauri::AppHandle) -> Result<(), String> {
+    if app.get_webview_window("desktop-lyrics").is_some() {
+        return Ok(()); // 已存在
+    }
+    let url = if cfg!(feature = "custom-protocol") {
+        WebviewUrl::App("lyrics.html".into())
+    } else {
+        WebviewUrl::External("http://localhost:1420/lyrics.html".parse().unwrap())
+    };
+    WebviewWindowBuilder::new(&app, "desktop-lyrics", url)
+        .title("Desktop Lyrics")
+        .inner_size(600.0, 80.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .resizable(false)
+        .shadow(false)
+        .build()
+        .map_err(|e| format!("Failed to create lyrics window: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_lyrics_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(win) = app.get_webview_window("desktop-lyrics") {
+        win.close().map_err(|e| format!("Failed to close lyrics: {}", e))?;
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -171,7 +242,9 @@ pub fn run() {
             init_log, write_log,
             rodio_play, rodio_pause, rodio_resume,
             rodio_position, rodio_duration,
-            rodio_set_volume, rodio_is_playing, rodio_stop, rodio_seek
+            rodio_set_volume, rodio_is_playing, rodio_stop, rodio_seek,
+            create_island_window, close_island_window,
+            create_lyrics_window, close_lyrics_window
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
