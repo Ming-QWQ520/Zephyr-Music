@@ -40,17 +40,27 @@ const neVipInfo = ref<{ isVip: boolean; redVipLevel: number; expireText: string 
 const neListenTotal = ref<string>("");
 
 // ===== 桌面灵动岛 & 桌面歌词窗口管理 =====
+let coreMod: any = null;
+async function getCoreMod() {
+  if (coreMod) return coreMod;
+  try { coreMod = await import("@tauri-apps/api/core"); } catch { /* not in Tauri */ }
+  return coreMod;
+}
+getCoreMod(); // 预加载
+
 async function createFloatingWindow(type: "island" | "lyrics") {
+  const mod = await getCoreMod();
+  if (!mod) return;
   try {
-    const mod = await import("@tauri-apps/api/core");
     if (type === "island") await mod.invoke("create_island_window");
     else await mod.invoke("create_lyrics_window");
     log.info("app", `created ${type} window`);
   } catch (e) { log.warn("app", `create ${type} window failed`, { error: String(e) }); }
 }
 async function closeFloatingWindow(type: "island" | "lyrics") {
+  const mod = await getCoreMod();
+  if (!mod) return;
   try {
-    const mod = await import("@tauri-apps/api/core");
     if (type === "island") await mod.invoke("close_island_window");
     else await mod.invoke("close_lyrics_window");
     log.info("app", `closed ${type} window`);
@@ -82,12 +92,28 @@ watch([
 });
 
 // 向浮动窗口发送播放状态和歌词数据
-async function emitToFloating(event: string, data: any) {
+// 缓存 event 模块避免每次动态导入
+let eventMod: any = null;
+let eventModLoading = false;
+async function getEventMod() {
+  if (eventMod) return eventMod;
+  if (eventModLoading) return null;
+  eventModLoading = true;
+  try { eventMod = await import("@tauri-apps/api/event"); } catch { /* not in Tauri */ }
+  eventModLoading = false;
+  return eventMod;
+}
+// 预加载
+getEventMod();
+
+function emitToFloating(event: string, data: any) {
+  if (!eventMod) return;
+  // 只在浮动窗口开启时发送
+  if (!settings.dynamicIsland && !settings.desktopLyrics) return;
   try {
-    const mod = await import("@tauri-apps/api/event");
-    if (settings.dynamicIsland) mod.emitTo("island", event, data);
-    if (settings.desktopLyrics) mod.emitTo("desktop-lyrics", event, data);
-  } catch { /* ignore if not in Tauri */ }
+    if (settings.dynamicIsland) eventMod.emitTo("island", event, data);
+    if (settings.desktopLyrics) eventMod.emitTo("desktop-lyrics", event, data);
+  } catch { /* ignore */ }
 }
 
 // 监听播放状态变化，发送给浮动窗口
@@ -96,24 +122,13 @@ watch(() => store.currentSong, (song) => {
     name: song.name, artist: song.artist, pic: song.pic, duration: song.duration,
     neteaseId: song.neteaseId, source: song.source,
   } : null);
-});
-watch(() => store.isPlaying, (playing) => { emitToFloating("play-state", { playing }); });
-watch(() => store.currentTime, (t) => { emitToFloating("time-update", { time: t }); });
-watch(() => store.lyrics, (lyrics) => { emitToFloating("lyrics-update", { lyrics }); });
-watch(() => store.activeLyricIndex, (idx) => { emitToFloating("lyric-index", { idx }); });
-
-// 发送逐字歌词数据给浮动窗口
-// 从 NowPlayingView 的 yrcLines 逻辑中获取逐字数据
-// 这里通过 store.currentSong 的 yrcText 提取
-watch(() => store.currentSong, (song) => {
+  // 同时发送逐字歌词数据
   const yrcText = (song as any)?.yrcText;
   if (yrcText) {
-    // 解析 yrc 为 words 数组
     const words: { start: number; duration: number; text: string }[] = [];
     for (const raw of yrcText.split("\n")) {
       const m = raw.match(/^\[(\d+),(\d+)\]/);
       if (!m) continue;
-      const startTime = parseInt(m[1]) / 1000;
       const wordRe = /\((\d+),(\d+),\d+\)([^(]+)/g;
       let wm;
       while ((wm = wordRe.exec(raw)) !== null) {
@@ -124,7 +139,18 @@ watch(() => store.currentSong, (song) => {
   } else {
     emitToFloating("yrc-update", { words: [] });
   }
-}, { immediate: true });
+});
+watch(() => store.isPlaying, (playing) => { emitToFloating("play-state", { playing }); });
+// time-update 节流：最多每 200ms 发一次，避免高频更新阻塞主线程
+let lastTimeEmit = 0;
+watch(() => store.currentTime, (t) => {
+  const now = Date.now();
+  if (now - lastTimeEmit < 200) return;
+  lastTimeEmit = now;
+  emitToFloating("time-update", { time: t });
+});
+watch(() => store.lyrics, (lyrics) => { emitToFloating("lyrics-update", { lyrics }); });
+watch(() => store.activeLyricIndex, (idx) => { emitToFloating("lyric-index", { idx }); });
 
 // 登录弹窗
 const showLoginModal = ref(false);
