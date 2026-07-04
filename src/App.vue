@@ -250,6 +250,10 @@ onMounted(() => {
   log.init();
   log.info("app", "booted");
   checkNeLogin();
+  // 全局禁用原生右键菜单（返回、刷新、另存为、打印等）
+  document.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+  });
   // 恢复上次播放的歌曲：重新获取 URL 和歌词
   const song = store.currentSong;
   if (song) {
