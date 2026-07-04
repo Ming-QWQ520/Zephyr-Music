@@ -215,7 +215,6 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <img v-if="store.currentSong?.pic" :src="store.currentSong.pic" :alt="store.currentSong.name" referrerpolicy="no-referrer" />
           <Icon v-else name="music" :size="22" />
         </div>
-        <div class="grooves" />
       </div>
       <div class="meta">
         <div class="title truncate">{{ store.currentSong?.name || "未在播放" }}</div>
@@ -359,12 +358,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   border-top: 1px solid var(--border);
 }
 .left-block { display: flex; align-items: center; gap: 12px; min-width: 0; cursor: pointer; }
-.vinyl { position: relative; width: 52px; height: 52px; flex-shrink: 0; border-radius: 50%; background: #0a0a0a; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+.vinyl { position: relative; width: 48px; height: 48px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 .vinyl.spinning .cover { animation: vinyl-spin 6s linear infinite; }
-.cover { width: 38px; height: 38px; border-radius: 50%; background: var(--bg-elev-3); overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
+.cover { width: 48px; height: 48px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
-.grooves::before, .grooves::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(255,255,255,0.04); pointer-events: none; }
-.grooves::before { inset: 4px; } .grooves::after { inset: 8px; }
 .meta { min-width: 0; flex: 1; }
 .meta .title { font-size: 13px; font-weight: 600; color: var(--text); }
 .meta .artist { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }

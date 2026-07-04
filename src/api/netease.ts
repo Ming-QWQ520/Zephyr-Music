@@ -485,6 +485,43 @@ export async function recommendSongs(): Promise<{
   return { code: r.code, data: { dailySongs: [] } };
 }
 
+/** 每日推荐歌单（/recommend/resource，需要登录） */
+export async function recommendResource(): Promise<{
+  code: number;
+  recommend?: NeteasePlaylist[];
+  data?: NeteasePlaylist[];
+}> {
+  log.info(TAG, "recommendResource()");
+  const r = await apiGet("/recommend/resource");
+  const list = r.recommend || r.data || [];
+  log.info(TAG, "recommendResource result", { code: r.code, count: list.length });
+  return r;
+}
+
+/** 歌单详情（/playlist/detail）
+ *  用于获取榜单精选等歌单详情
+ *  id: 歌单ID
+ *  s: 最近S个游客收藏数
+ */
+export async function playlistDetail(id: number, s = 8): Promise<{
+  code: number;
+  playlist?: NeteasePlaylist & {
+    trackCount?: number;
+    playCount?: number;
+    tracks?: NeteaseSong[];
+    trackIds?: { id: number }[];
+    creator?: { nickname: string };
+    description?: string;
+    tags?: string[];
+  };
+  privileges?: any[];
+}> {
+  log.info(TAG, "playlistDetail()", { id, s });
+  const r = await apiGet("/playlist/detail", { id, s });
+  log.info(TAG, "playlistDetail result", { code: r.code, playlistName: r.playlist?.name, trackCount: r.playlist?.trackCount });
+  return r;
+}
+
 // ===== 歌曲相关 =====
 
 export interface NeteaseSong {

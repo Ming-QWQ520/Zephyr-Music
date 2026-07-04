@@ -7,7 +7,9 @@ import { getCachedPlaylists, _cachedUser, type NeteasePlaylist } from "@/api/net
 
 const store = usePlayerStore();
 
-const recommendItems: { key: ViewKey; label: string; icon: string }[] = [];
+const recommendItems: { key: ViewKey; label: string; icon: string }[] = [
+  { key: "recommend", label: "推荐", icon: "sparkles" },
+];
 
 function selectView(v: ViewKey) { store.setView(v); }
 

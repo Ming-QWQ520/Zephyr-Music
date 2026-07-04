@@ -11,5 +11,5 @@ export interface Song {
   duration?: number;
 }
 export interface LyricLine { time: number; text: string; translation?: string; }
-export type ViewKey = "search" | "nowplaying" | "queue" | "library" | "netease";
+export type ViewKey = "search" | "nowplaying" | "queue" | "library" | "netease" | "recommend";
 export type RepeatMode = "off" | "all" | "one";

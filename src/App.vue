@@ -9,6 +9,7 @@ import SearchView from "@/components/SearchView.vue";
 import NeteaseView from "@/components/NeteaseView.vue";
 import QueueView from "@/components/QueueView.vue";
 import LibraryView from "@/components/LibraryView.vue";
+import RecommendView from "@/components/RecommendView.vue";
 import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
@@ -321,9 +322,7 @@ onUnmounted(() => {
     <audio ref="audioRef" preload="auto" />
 
     <!-- Titlebar -->
-    <header class="titlebar">
-      <!-- Drag region as background layer (doesn't block child clicks) -->
-      <div class="titlebar-drag-bg" data-tauri-drag-region></div>
+    <header class="titlebar" data-tauri-drag-region>
       <div class="tb-left">
         <div class="brand">
           <img src="/favicon.svg" alt="Zephyr" class="brand-icon" />
@@ -404,6 +403,7 @@ onUnmounted(() => {
       <main class="main-view">
         <SearchView v-if="store.currentView === 'search'" />
         <NeteaseView v-else-if="store.currentView === 'netease'" />
+        <RecommendView v-else-if="store.currentView === 'recommend'" />
         <QueueView v-else-if="store.currentView === 'queue'" />
         <LibraryView v-else-if="store.currentView === 'library'" />
         <div v-else class="placeholder-view">
@@ -502,16 +502,6 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--border);
   gap: 8px;
   flex-shrink: 0;
-  position: relative;
-}
-.titlebar-drag-bg {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-}
-.titlebar > *:not(.titlebar-drag-bg) {
-  position: relative;
-  z-index: 1;
 }
 .tb-left {
   display: flex;
@@ -566,7 +556,7 @@ onUnmounted(() => {
 .ne-name { font-size: 12px; color: var(--text); }
 
 .ne-dropdown {
-  position: absolute; top: 34px; right: 0; z-index: 300;
+  position: absolute; top: 100%; right: 0; z-index: 9999;
   min-width: 200px; background: var(--bg-elev-3);
   border: 1px solid var(--border-strong); border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 16px; text-align: center;
