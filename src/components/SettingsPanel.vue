@@ -64,13 +64,6 @@ export interface PlayerSettings {
   autoHideMiniInfo: boolean;
   smoothLyricScroll: boolean; // 歌词平滑滚动（滚轮滑动时有过渡效果）
   coverRotation: boolean; // 首页封面旋转（播放时旋转）
-  // 桌面歌词 & 灵动岛
-  desktopLyrics: boolean; // 桌面歌词开关
-  desktopLyricsLocked: boolean; // 桌面歌词锁定
-  dynamicIsland: boolean; // 灵动岛开关
-  dynamicIslandLocked: boolean; // 灵动岛锁定
-  dynamicIslandShowLyric: boolean; // 灵动岛显示歌词
-  dynamicIslandCoverRotate: boolean; // 灵动岛封面旋转
 
   // Experimental
   gpuAcceleration: boolean;
@@ -129,12 +122,6 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   autoHideMiniInfo: true,
   smoothLyricScroll: false,
   coverRotation: false,
-  desktopLyrics: false,
-  desktopLyricsLocked: false,
-  dynamicIsland: false,
-  dynamicIslandLocked: false,
-  dynamicIslandShowLyric: true,
-  dynamicIslandCoverRotate: true,
 
   gpuAcceleration: true,
   debugLog: false,
@@ -596,30 +583,7 @@ const APP_VERSION = "1.0.0";
                 <div class="label">首页封面旋转</div>
                 <button class="switch" :class="{ on: settings.coverRotation }" @click="settings.coverRotation = !settings.coverRotation" />
               </div>
-              <div class="row toggle">
-                <div class="label">桌面歌词</div>
-                <button class="switch" :class="{ on: settings.desktopLyrics }" @click="settings.desktopLyrics = !settings.desktopLyrics" />
-              </div>
-              <div v-if="settings.desktopLyrics" class="row toggle">
-                <div class="label">锁定桌面歌词</div>
-                <button class="switch" :class="{ on: settings.desktopLyricsLocked }" @click="settings.desktopLyricsLocked = !settings.desktopLyricsLocked" />
-              </div>
-              <div class="row toggle">
-                <div class="label">桌面灵动岛</div>
-                <button class="switch" :class="{ on: settings.dynamicIsland }" @click="settings.dynamicIsland = !settings.dynamicIsland" />
-              </div>
-              <div v-if="settings.dynamicIsland" class="row toggle">
-                <div class="label">灵动岛显示歌词</div>
-                <button class="switch" :class="{ on: settings.dynamicIslandShowLyric }" @click="settings.dynamicIslandShowLyric = !settings.dynamicIslandShowLyric" />
-              </div>
-              <div v-if="settings.dynamicIsland" class="row toggle">
-                <div class="label">灵动岛封面旋转</div>
-                <button class="switch" :class="{ on: settings.dynamicIslandCoverRotate }" @click="settings.dynamicIslandCoverRotate = !settings.dynamicIslandCoverRotate" />
-              </div>
-              <div v-if="settings.dynamicIsland" class="row toggle">
-                <div class="label">锁定灵动岛</div>
-                <button class="switch" :class="{ on: settings.dynamicIslandLocked }" @click="settings.dynamicIslandLocked = !settings.dynamicIslandLocked" />
-              </div>
+
             </section>
 
             <!-- Experimental -->

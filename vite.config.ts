@@ -24,12 +24,5 @@ export default defineConfig(async () => ({
     target: process.env.TAURI_ENV_PLATFORM === "windows" ? "chrome105" : "safari13",
     minify: !process.env.TAURI_ENV_DEBUG ? "esbuild" : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
-    rollupOptions: {
-      input: {
-        main: fileURLToPath(new URL("./index.html", import.meta.url)),
-        island: fileURLToPath(new URL("./island.html", import.meta.url)),
-        lyrics: fileURLToPath(new URL("./lyrics.html", import.meta.url)),
-      },
-    },
   },
 }));
