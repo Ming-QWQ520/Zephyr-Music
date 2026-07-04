@@ -14,6 +14,7 @@ import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
 import HomeSettingsPanel from "@/components/HomeSettingsPanel.vue";
+import WindowControls from "@/components/WindowControls.vue";
 import { useHomeSettings } from "@/composables/useHomeSettings";
 import ToastContainer from "@/components/ToastContainer.vue";
 import Icon from "@/components/Icon.vue";
@@ -355,7 +356,7 @@ onUnmounted(() => {
       <div class="wallpaper-overlay"></div>
     </div>
 
-    <!-- Titlebar -->
+    <!-- Titlebar（品牌 + 右侧操作，搜索框和窗口控件已剥离浮于其上）-->
     <header class="titlebar" data-tauri-drag-region>
       <div class="tb-left">
         <div class="brand">
@@ -364,10 +365,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 搜索框（左移 5px）-->
-      <div class="tb-center" style="margin-left: -5px;">
-        <GlobalSearchBar />
-      </div>
+      <div class="tb-spacer" />
 
       <div class="tb-right">
         <!-- 网易云登录/头像 -->
@@ -422,13 +420,18 @@ onUnmounted(() => {
         <button class="icon-btn" title="首页设置" @click="showHomeSettings = true">
           <img src="/icons/settings.svg" alt="settings" class="settings-icon" />
         </button>
-        <div class="win-ctrls">
-          <button class="win-btn" title="最小化" @click="minimizeWindow"><Icon name="minimize" :size="14" /></button>
-          <button class="win-btn" title="最大化" @click="toggleMaximize"><svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/></svg></button>
-          <button class="win-btn win-close" title="关闭" @click="closeWindow"><svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button>
-        </div>
       </div>
     </header>
+
+    <!-- 搜索框：浮于标题栏上方，居中，与标题栏剥离 -->
+    <div class="floating-search">
+      <GlobalSearchBar />
+    </div>
+
+    <!-- 窗口控件：浮于标题栏右上角，与标题栏剥离 -->
+    <div class="floating-win-ctrls">
+      <WindowControls @minimize="minimizeWindow" @toggleMaximize="toggleMaximize" @close="closeWindow" />
+    </div>
 
     <!-- Body: sidebar + main view + playerbar -->
     <div class="app-body">
@@ -579,10 +582,14 @@ onUnmounted(() => {
   align-items: center;
   height: var(--titlebar-h);
   padding: 0 12px;
+  /* 右侧留出窗口控件空间 */
+  padding-right: 110px;
   background: var(--bg-elev-1);
   border-bottom: 1px solid var(--border);
   gap: 8px;
   flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 .tb-left {
   display: flex;
@@ -592,6 +599,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .tb-left .icon-btn { width: 28px; height: 28px; }
+.tb-spacer { flex: 1; }
 .brand {
   display: flex;
   align-items: center;
@@ -608,12 +616,6 @@ onUnmounted(() => {
   font-weight: 600;
   letter-spacing: 0.4px;
 }
-.tb-center {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  min-width: 0;
-}
 .tb-right {
   display: flex;
   align-items: center;
@@ -621,6 +623,31 @@ onUnmounted(() => {
 }
 .tb-right .icon-btn { width: 28px; height: 28px; }
 .settings-icon { width: 16px; height: 16px; display: inline-block; pointer-events: none; }
+
+/* 搜索框：浮于标题栏上方，居中，与标题栏剥离 */
+.floating-search {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  width: 420px;
+  max-width: calc(100vw - 280px);
+  -webkit-app-region: no-drag;
+}
+.floating-search :deep(.search-bar) {
+  background: var(--bg-elev-3);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+}
+
+/* 窗口控件：浮于标题栏右上角，与标题栏剥离 */
+.floating-win-ctrls {
+  position: fixed;
+  top: 9px;
+  right: 12px;
+  z-index: 50;
+  -webkit-app-region: no-drag;
+}
 
 /* 网易云登录 */
 .ne-auth { position: relative; margin-right: 4px; }
@@ -739,31 +766,6 @@ onUnmounted(() => {
 }
 .login-modal-enter-from .login-modal, .login-modal-leave-to .login-modal {
   transform: scale(0.92);
-}
-
-/* Window controls (rightmost) */
-.win-ctrls {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  margin-left: 4px;
-}
-.win-btn {
-  width: 36px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  color: var(--text-secondary);
-  transition: background 0.12s, color 0.12s;
-  -webkit-app-region: no-drag;
-}
-.win-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  color: var(--text);
-}
-.win-close:hover {
-  background: var(--accent);
-  color: #fff;
 }
 
 /* ----- Body ----- */
