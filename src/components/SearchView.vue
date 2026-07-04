@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { searchSongs, neteaseSongToSong, songDetail, likeSong, getCachedLikeList, addLikeCache, removeLikeCache, playlistTracks, type NeteasePlaylist } from "@/api/netease";
+import { searchSongs, neteaseSongToSong, songDetail, songLike, getCachedLikeList, addLikeCache, removeLikeCache, getCachedUser, playlistTracks, type NeteasePlaylist } from "@/api/netease";
 import { pickLocalAudioFiles } from "@/api/localMusic";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
@@ -49,9 +49,11 @@ function ctxPlayLast() { if (contextMenu.value.song) store.addToQueue(contextMen
 async function ctxToggleLike() {
   const song = contextMenu.value.song;
   if (!song || song.source !== "netease" || !song.neteaseId) return;
+  const user = await getCachedUser();
+  if (!user) { toast.error("请先登录"); closeContextMenu(); return; }
   try {
     const newLike = !ctxSongLiked.value;
-    await likeSong(song.neteaseId, newLike);
+    await songLike(song.neteaseId, user.userId, newLike);
     ctxSongLiked.value = newLike;
     if (newLike) addLikeCache(song.neteaseId); else removeLikeCache(song.neteaseId);
   } catch { /* ignore */ }
