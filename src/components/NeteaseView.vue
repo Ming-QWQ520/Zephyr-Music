@@ -6,8 +6,8 @@ import {
   getCachedUser, getCachedPlaylists,
   neteaseSongToSong, getCookie, _cachedUser,
   likeSong, playlistTracks, getCachedLikeList, addLikeCache, removeLikeCache,
-  playlistDetail,
-  type NeteasePlaylist,
+  playlistDetail, playlistDetailDynamic, commentPlaylist, playlistSubscribers,
+  type NeteasePlaylist, type PlaylistComment, type PlaylistSubscriber,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
@@ -191,23 +191,110 @@ async function loadPlaylistById(id: number) {
   songLikedSet.value = new Set();
   selectedPlaylistId.value = id;
   loadingSongs.value = true;
+  // 清空详情数据
+  playlistDesc.value = "";
+  playlistDynamic.value = null;
+  playlistComments.value = [];
+  playlistSubs.value = [];
+  commentOffset.value = 0;
+  subsOffset.value = 0;
+  activeDetailTab.value = "songs";
   try {
     const res = await playlistDetail(id, 0);
     const pl = res.playlist;
     if (pl) {
       selectedPlaylistName.value = pl.name || "歌单";
       selectedPlaylistCover.value = pl.coverImgUrl || "";
+      playlistDesc.value = pl.description || (pl.creator as any)?.nickname ? `by ${pl.creator?.nickname}` : "";
       // playlistDetail 的 tracks 只有前10首，用 playlistTrackAll 获取全部
       const trackRes = await playlistTrackAll(id);
       currentPlaylistSongs.value = (trackRes.songs || []).map(neteaseSongToSong);
       loadSongLikedStatus();
       log.info("netease-view", "loadPlaylistById done", { id, name: pl.name, count: currentPlaylistSongs.value.length });
+      // 后台加载详情动态、评论、收藏者
+      loadPlaylistExtra(id);
     }
   } catch (e) {
     log.warn("netease-view", "loadPlaylistById failed", { error: String(e) });
     currentPlaylistSongs.value = [];
   }
   loadingSongs.value = false;
+}
+
+/** 歌单详情数据 */
+const playlistDesc = ref("");
+const playlistDynamic = ref<{ commentCount: number; playCount: number; bookedCount: number; shareCount: number } | null>(null);
+const playlistComments = ref<PlaylistComment[]>([]);
+const playlistSubs = ref<PlaylistSubscriber[]>([]);
+const activeDetailTab = ref<"songs" | "comments" | "subscribers">("songs");
+const commentOffset = ref(0);
+const subsOffset = ref(0);
+const loadingComments = ref(false);
+const loadingSubs = ref(false);
+
+/** 后台加载歌单详情动态、评论、收藏者 */
+async function loadPlaylistExtra(id: number) {
+  // 动态
+  playlistDetailDynamic(id).then(res => {
+    const d = (res as any).data || res;
+    if (d) {
+      playlistDynamic.value = {
+        commentCount: d.commentCount || 0,
+        playCount: d.playCount || 0,
+        bookedCount: d.bookedCount || 0,
+        shareCount: d.shareCount || 0,
+      };
+    }
+  }).catch(() => {});
+  // 评论（第一页 + 热门评论）
+  loadComments(id, true);
+  // 收藏者
+  loadSubscribers(id, true);
+}
+
+async function loadComments(id: number, reset = false) {
+  if (loadingComments.value) return;
+  if (reset) { commentOffset.value = 0; playlistComments.value = []; }
+  loadingComments.value = true;
+  try {
+    const res = await commentPlaylist(id, 20, commentOffset.value);
+    const newComments = [...(res.hotComments || []), ...(res.comments || [])];
+    if (reset) playlistComments.value = newComments;
+    else playlistComments.value.push(...(res.comments || []));
+    commentOffset.value += 20;
+  } catch { /* ignore */ }
+  loadingComments.value = false;
+}
+
+async function loadSubscribers(id: number, reset = false) {
+  if (loadingSubs.value) return;
+  if (reset) { subsOffset.value = 0; playlistSubs.value = []; }
+  loadingSubs.value = true;
+  try {
+    const res = await playlistSubscribers(id, 20, subsOffset.value);
+    if (reset) playlistSubs.value = res.subscribers || [];
+    else playlistSubs.value.push(...(res.subscribers || []));
+    subsOffset.value += 20;
+  } catch { /* ignore */ }
+  loadingSubs.value = false;
+}
+
+/** 滚动到底部加载更多评论/收藏者 */
+function onDetailScroll(e: Event) {
+  const el = e.target as HTMLElement;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50) {
+    if (activeDetailTab.value === "comments") {
+      loadComments(selectedPlaylistId.value!, false);
+    } else if (activeDetailTab.value === "subscribers") {
+      loadSubscribers(selectedPlaylistId.value!, false);
+    }
+  }
+}
+
+function formatCount(n: number): string {
+  if (n >= 100000000) return (n / 100000000).toFixed(1) + "亿";
+  if (n >= 10000) return (n / 10000).toFixed(1) + "万";
+  return String(n);
 }
 
 /** 返回上一页 */
@@ -346,13 +433,33 @@ function confirmAddToPlaylist(pl: NeteasePlaylist) {
 }
 function onDocClick() { closeContextMenu(); }
 
-onMounted(() => { document.addEventListener("click", onDocClick); loadData(); });
+onMounted(() => {
+  document.addEventListener("click", onDocClick);
+  // 如果有 pendingPlaylistId（从推荐页榜单点击进入），不自动加载第一个歌单
+  // pendingPlaylistId 的 immediate watch 会处理
+  if (store.pendingPlaylistId === null) {
+    loadData();
+  } else {
+    // 只加载歌单列表（侧边栏用），但不自动选中
+    loadPlaylistsOnly();
+  }
+});
+
+/** 只加载歌单列表，不自动选中第一个 */
+async function loadPlaylistsOnly() {
+  if (!getCookie()) return;
+  const user = await getCachedUser();
+  if (!user) return;
+  loggedIn.value = true;
+  const pls = await getCachedPlaylists();
+  playlists.value = pls;
+}
 
 // 监听用户登录状态变化，登录后及时获取歌单
 watch(() => _cachedUser.value, (user) => {
   if (user && !loggedIn.value) {
     log.info("netease-view", "user logged in, reloading data");
-    loadData();
+    loadPlaylistsOnly();
   }
 }, { immediate: true });
 
@@ -403,18 +510,63 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
               <span class="record-tab-sep">|</span>
               <button class="record-tab" :class="{ active: recordType === 0 }" @click="switchRecordType(0)">所有时间</button>
             </div>
-            <span v-else class="songs-count">{{ currentPlaylistSongs.length }} 首</span>
+            <span v-else class="songs-count">
+              {{ currentPlaylistSongs.length }} 首
+              <span v-if="playlistDynamic" class="dynamic-info">
+                · {{ formatCount(playlistDynamic.playCount) }}次播放
+                · {{ formatCount(playlistDynamic.bookedCount) }}人收藏
+              </span>
+            </span>
           </div>
+          <!-- 歌单描述 -->
+          <div v-if="playlistDesc && !isRecordView" class="playlist-desc line-clamp-2">{{ playlistDesc }}</div>
         </div>
         <button class="play-all-btn" @click="playAll" :disabled="!currentPlaylistSongs.length">
           <Icon name="play" :size="14" /><span>播放全部</span>
         </button>
       </header>
 
-      <div class="songs-body nice-scroll">
+      <!-- 详情标签页（仅非听歌排行时显示） -->
+      <div v-if="!isRecordView && showBackBtn" class="detail-tabs">
+        <button class="detail-tab" :class="{ active: activeDetailTab === 'songs' }" @click="activeDetailTab = 'songs'">歌曲</button>
+        <button class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="activeDetailTab = 'comments'">
+          评论<span v-if="playlistDynamic"> ({{ formatCount(playlistDynamic.commentCount) }})</span>
+        </button>
+        <button class="detail-tab" :class="{ active: activeDetailTab === 'subscribers' }" @click="activeDetailTab = 'subscribers'">收藏者</button>
+      </div>
+
+      <div class="songs-body nice-scroll" @scroll="onDetailScroll">
+        <!-- 歌曲列表 -->
         <div v-if="loadingSongs && !currentPlaylistSongs.length" class="songs-loading">加载中...</div>
-        <div v-else-if="!currentPlaylistSongs.length" class="songs-empty">
+        <div v-else-if="!currentPlaylistSongs.length && activeDetailTab === 'songs'" class="songs-empty">
           <Icon name="music" :size="42" /><p>选择左侧歌单查看歌曲</p>
+        </div>
+        <!-- 评论列表 -->
+        <div v-else-if="activeDetailTab === 'comments'" class="comments-list">
+          <div v-if="loadingComments && !playlistComments.length" class="songs-loading">加载评论中...</div>
+          <div v-else-if="!playlistComments.length" class="songs-empty"><p>暂无评论</p></div>
+          <div v-for="c in playlistComments" :key="c.commentId" class="comment-item">
+            <img v-if="c.user.avatarUrl" :src="c.user.avatarUrl + '?param=50x50'" class="comment-avatar" referrerpolicy="no-referrer" loading="lazy" />
+            <div class="comment-body">
+              <div class="comment-header">
+                <span class="comment-user">{{ c.user.nickname }}</span>
+                <span v-if="c.likedCount > 0" class="comment-likes">👍 {{ c.likedCount }}</span>
+              </div>
+              <div class="comment-content">{{ c.content }}</div>
+            </div>
+          </div>
+        </div>
+        <!-- 收藏者列表 -->
+        <div v-else-if="activeDetailTab === 'subscribers'" class="subs-list">
+          <div v-if="loadingSubs && !playlistSubs.length" class="songs-loading">加载收藏者中...</div>
+          <div v-else-if="!playlistSubs.length" class="songs-empty"><p>暂无收藏者</p></div>
+          <div v-for="s in playlistSubs" :key="s.userId" class="sub-item">
+            <img v-if="s.avatarUrl" :src="s.avatarUrl + '?param=50x50'" class="sub-avatar" referrerpolicy="no-referrer" loading="lazy" />
+            <div class="sub-info">
+              <div class="sub-name truncate">{{ s.nickname }}</div>
+              <div v-if="s.signature" class="sub-sig truncate">{{ s.signature }}</div>
+            </div>
+          </div>
         </div>
         <template v-else>
           <div class="song-thead" :class="{ 'record-thead': isRecordView }">
@@ -546,6 +698,30 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .songs-header-info { flex: 1; min-width: 0; }
 .songs-header-info h2 { margin: 0; font-size: 20px; font-weight: 700; }
 .songs-count { font-size: 12px; color: var(--text-tertiary); }
+.dynamic-info { font-size: 11px; opacity: 0.7; }
+.playlist-desc { font-size: 12px; color: var(--text-tertiary); margin-top: 6px; line-height: 1.5; max-width: 500px; }
+/* 详情标签页 */
+.detail-tabs { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--border); }
+.detail-tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
+.detail-tab:hover { color: var(--text); }
+.detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+/* 评论 */
+.comments-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+.comment-item { display: flex; gap: 12px; }
+.comment-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
+.comment-body { flex: 1; min-width: 0; }
+.comment-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.comment-user { font-size: 13px; font-weight: 600; color: var(--text); }
+.comment-likes { font-size: 11px; color: var(--text-tertiary); }
+.comment-content { font-size: 13px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
+/* 收藏者 */
+.subs-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 8px; }
+.sub-item { display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: var(--radius-sm); transition: background 0.15s; }
+.sub-item:hover { background: var(--bg-hover); }
+.sub-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
+.sub-info { flex: 1; min-width: 0; }
+.sub-name { font-size: 13px; color: var(--text); font-weight: 500; }
+.sub-sig { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
 .songs-header-meta { margin-top: 2px; }
 /* 听歌排行切换标签 */
 .record-tabs { display: flex; align-items: center; gap: 8px; font-size: 12px; }
