@@ -42,8 +42,18 @@ async function pickWallpaper() {
       filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }],
     });
     if (typeof file === "string") {
-      // 转换为 tauri asset 协议 URL，以便在 img src 中使用
-      settings.bgImage = file.startsWith("http") ? file : `localfile://${file}`;
+      // Tauri 2: 用 convertFileSrc 把本地路径转成 asset:// 协议 URL
+      // CSP 允许 http://asset.localhost / https://asset.localhost
+      let url = file;
+      if (!file.startsWith("http") && !file.startsWith("data:") && !file.startsWith("asset:")) {
+        try {
+          const { convertFileSrc } = await import("@tauri-apps/api/core");
+          url = convertFileSrc(file);
+        } catch {
+          url = `localfile://${file}`;
+        }
+      }
+      settings.bgImage = url;
       settings.bgType = "image";
       toast.success("壁纸已设置", "背景将覆盖整个窗口");
     }
@@ -116,11 +126,8 @@ function useUrlWallpaper() {
 
             <!-- 壁纸预览 + 操作 -->
             <div v-if="settings.bgType === 'image'" class="wallpaper-block">
-              <div class="wallpaper-preview" :style="{
-                backgroundImage: settings.bgImage ? `url('${settings.bgImage}')` : 'none',
-                backgroundSize: settings.bgFit,
-                filter: `blur(${settings.bgBlur}px) brightness(${1 - settings.bgDim / 100})`,
-              }">
+              <div class="wallpaper-preview">
+                <img v-if="settings.bgImage" :src="settings.bgImage" :style="{ objectFit: settings.bgFit, filter: `blur(${settings.bgBlur}px) brightness(${1 - settings.bgDim / 100})` }" @error="(e: any) => e.target.style.display='none'" />
                 <div v-if="!settings.bgImage" class="wallpaper-empty">
                   <Icon name="image" :size="32" />
                   <span>未设置壁纸</span>
@@ -274,9 +281,10 @@ function useUrlWallpaper() {
 .wallpaper-block { display: flex; flex-direction: column; gap: 10px; }
 .wallpaper-preview {
   width: 100%; height: 140px; border-radius: 10px;
-  background-color: var(--bg-elev-1); background-position: center; background-repeat: no-repeat;
+  background-color: var(--bg-elev-1);
   border: 1px solid var(--border); overflow: hidden; position: relative;
 }
+.wallpaper-preview img { width: 100%; height: 100%; object-position: center; display: block; }
 .wallpaper-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--text-tertiary); font-size: 12px; }
 .wallpaper-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
