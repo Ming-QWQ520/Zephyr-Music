@@ -381,9 +381,9 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctrl-btn:active { background: var(--bg-active); }
 .ctrl-btn.active { color: var(--accent); background: var(--accent-soft); }
 .ctrl-btn[disabled] { opacity: 0.38; cursor: not-allowed; pointer-events: none; }
-/* MD3 FAB-style play button */
-.ctrl-btn.play { width: 48px; height: 48px; color: var(--on-accent); background: var(--accent); margin: 0 4px; }
-.ctrl-btn.play:hover { color: var(--on-accent); background: var(--accent-strong); transform: scale(1.05); }
+/* Play button - no background fill */
+.ctrl-btn.play { width: 44px; height: 44px; color: var(--text); margin: 0 4px; }
+.ctrl-btn.play:hover { color: #fff; transform: scale(1.05); }
 .ctrl-btn.play:active { transform: scale(0.95); }
 
 .progress-row { display: flex; align-items: center; gap: 8px; width: 100%; max-width: 520px; }
