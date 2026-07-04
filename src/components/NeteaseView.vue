@@ -6,6 +6,7 @@ import {
   getCachedUser, getCachedPlaylists,
   neteaseSongToSong, getCookie, _cachedUser,
   likeSong, playlistTracks, getCachedLikeList, addLikeCache, removeLikeCache,
+  playlistDetail,
   type NeteasePlaylist,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
@@ -179,6 +180,47 @@ function getPlayCount(songId: string): number {
   return playCountMap.value.get(songId) || 0;
 }
 
+/** 通过 playlistDetail 加载歌单/榜单（不在用户歌单列表中的） */
+async function loadPlaylistById(id: number) {
+  isRecordView.value = false;
+  playCountMap.value = new Map();
+  songLikedSet.value = new Set();
+  selectedPlaylistId.value = id;
+  loadingSongs.value = true;
+  try {
+    const res = await playlistDetail(id, 0);
+    const pl = res.playlist;
+    if (pl) {
+      selectedPlaylistName.value = pl.name || "歌单";
+      selectedPlaylistCover.value = pl.coverImgUrl || "";
+      // playlistDetail 的 tracks 只有前10首，用 playlistTrackAll 获取全部
+      const trackRes = await playlistTrackAll(id);
+      currentPlaylistSongs.value = (trackRes.songs || []).map(neteaseSongToSong);
+      loadSongLikedStatus();
+      log.info("netease-view", "loadPlaylistById done", { id, name: pl.name, count: currentPlaylistSongs.value.length });
+    }
+  } catch (e) {
+    log.warn("netease-view", "loadPlaylistById failed", { error: String(e) });
+    currentPlaylistSongs.value = [];
+  }
+  loadingSongs.value = false;
+}
+
+/** 返回推荐页 */
+function goBack() {
+  store.setView("recommend");
+}
+
+/** 是否显示返回按钮（榜单等非用户歌单时显示） */
+const showBackBtn = computed(() => {
+  const pid = selectedPlaylistId.value;
+  // 每日推荐(-1)和听歌排行(-2)不显示返回
+  if (pid === -1 || pid === -2) return false;
+  // 用户歌单列表中的不显示返回
+  if (playlists.value.some(p => p.id === pid)) return false;
+  return true;
+});
+
 // 右键菜单
 const contextMenu = ref<{ visible: boolean; x: number; y: number; song: Song | null }>({ visible: false, x: 0, y: 0, song: null });
 const ctxSongLiked = ref(false);  // 当前右键歌曲是否已喜欢
@@ -314,9 +356,14 @@ watch(() => store.pendingPlaylistId, (id) => {
   if (id !== null) {
     if (id === -1) { loadDailyRecommend(); }
     else if (id === -2) { loadRecord(recordType.value); }
-    else if (playlists.value.length > 0) {
+    else {
+      // 先从缓存的歌单列表找
       const pl = playlists.value.find(p => p.id === id);
       if (pl) selectPlaylist(pl);
+      else {
+        // 榜单等不在用户歌单列表中的，用 playlistDetail 加载
+        loadPlaylistById(id);
+      }
     }
     store.pendingPlaylistId = null;
   }
@@ -336,6 +383,9 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
     <!-- 已登录：只显示歌曲表格（歌单列表在侧边栏）-->
     <div v-else class="ne-songs">
       <header class="songs-header" :class="{ 'no-cover': isRecordView }">
+        <button v-if="showBackBtn" class="back-btn" @click="goBack" title="返回">
+          <Icon name="chevronLeft" :size="22" />
+        </button>
         <div v-if="!isRecordView" class="songs-header-cover">
           <img v-if="selectedPlaylistCover" :src="selectedPlaylistCover" alt="" referrerpolicy="no-referrer" />
           <Icon v-else name="music" :size="32" />
@@ -484,6 +534,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 .ne-songs { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .songs-header { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
+.back-btn { width: 40px; height: 40px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: color 0.2s, background 0.2s; flex-shrink: 0; }
+.back-btn:hover { color: var(--text); background: var(--bg-hover); }
 .songs-header.no-cover { gap: 0; }
 .songs-header-cover { width: 64px; height: 64px; border-radius: 10px; flex-shrink: 0; background: var(--bg-elev-3); overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .songs-header-cover img { width: 100%; height: 100%; object-fit: cover; }

@@ -522,6 +522,44 @@ export async function playlistDetail(id: number, s = 8): Promise<{
   return r;
 }
 
+/** 歌单详情动态（/playlist/detail/dynamic） */
+export async function playlistDetailDynamic(id: number): Promise<{
+  code: number; commentCount?: number; shareCount?: number; playCount?: number; bookedCount?: number; subscribed?: boolean;
+}> {
+  log.info(TAG, "playlistDetailDynamic()", { id });
+  const r = await apiGet("/playlist/detail/dynamic", { id });
+  log.info(TAG, "playlistDetailDynamic result", { code: r.code, commentCount: r.commentCount, playCount: r.playCount });
+  return r;
+}
+
+/** 歌单评论（/comment/playlist） */
+export interface PlaylistComment {
+  commentId: number; content: string; time: number; likedCount: number;
+  user: { userId: number; nickname: string; avatarUrl: string };
+}
+export async function commentPlaylist(id: number, limit = 20, offset = 0): Promise<{
+  code: number; total?: number; hotComments?: PlaylistComment[]; comments?: PlaylistComment[]; more?: boolean;
+}> {
+  const params: Record<string, string | number> = { id, limit, offset };
+  log.info(TAG, "commentPlaylist()", { id, limit, offset });
+  const r = await apiGet("/comment/playlist", params);
+  log.info(TAG, "commentPlaylist result", { code: r.code, total: r.total, count: r.comments?.length || 0 });
+  return r;
+}
+
+/** 歌单收藏者（/playlist/subscribers） */
+export interface PlaylistSubscriber {
+  userId: number; nickname: string; avatarUrl: string; signature?: string;
+}
+export async function playlistSubscribers(id: number, limit = 20, offset = 0): Promise<{
+  code: number; subscribers?: PlaylistSubscriber[]; more?: boolean;
+}> {
+  log.info(TAG, "playlistSubscribers()", { id, limit, offset });
+  const r = await apiGet("/playlist/subscribers", { id, limit, offset });
+  log.info(TAG, "playlistSubscribers result", { code: r.code, count: r.subscribers?.length || 0 });
+  return r;
+}
+
 // ===== 歌曲相关 =====
 
 export interface NeteaseSong {

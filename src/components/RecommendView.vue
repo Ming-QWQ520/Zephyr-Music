@@ -58,6 +58,11 @@ function openPlaylist(pl: NeteasePlaylist) {
   store.setView("netease");
 }
 
+function openRanking(id: number) {
+  store.pendingPlaylistId = id;
+  store.setView("netease");
+}
+
 onMounted(() => { loadData(); });
 </script>
 
@@ -83,12 +88,13 @@ onMounted(() => { loadData(); });
       <h2 class="section-title">榜单精选</h2>
       <div class="ranking-grid">
         <div v-for="r in rankings" :key="r.id" class="ranking-card">
-          <div class="ranking-header">
+          <div class="ranking-header" @click="openRanking(r.id)" style="cursor: pointer;">
             <div class="ranking-cover">
               <img v-if="r.coverImgUrl" :src="r.coverImgUrl + '?param=100x100'" :alt="r.name" referrerpolicy="no-referrer" loading="lazy" />
               <Icon v-else name="music" :size="20" />
             </div>
             <div class="ranking-name">{{ r.name }}</div>
+            <Icon name="chevronRight" :size="16" class="ranking-arrow" />
           </div>
           <div v-if="r.loading" class="ranking-loading"><div class="spinner-sm" /></div>
           <div v-else class="ranking-songs">
@@ -128,7 +134,9 @@ onMounted(() => { loadData(); });
 .ranking-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .ranking-cover { width: 48px; height: 48px; border-radius: var(--radius-sm); overflow: hidden; flex-shrink: 0; background: var(--bg-elev-3); display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .ranking-cover img { width: 100%; height: 100%; object-fit: cover; }
-.ranking-name { font-size: 16px; font-weight: 700; color: var(--text); }
+.ranking-name { font-size: 16px; font-weight: 700; color: var(--text); flex: 1; }
+.ranking-arrow { color: var(--text-tertiary); flex-shrink: 0; }
+.ranking-header:hover .ranking-arrow { color: var(--accent); }
 .ranking-loading { display: flex; justify-content: center; padding: 12px; }
 .ranking-songs { display: flex; flex-direction: column; gap: 2px; }
 .ranking-song { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); text-align: left; transition: background 0.15s; }
