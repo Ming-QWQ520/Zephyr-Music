@@ -69,3 +69,26 @@ export async function playlistSubscribers(id: number, limit = 20, offset = 0): P
   log.info(TAG, "playlistSubscribers result", { code: r.code, count: r.subscribers?.length || 0 });
   return r;
 }
+
+/** 发送/回复/删除评论（/comment）
+ *  t: 1=发送, 2=回复, 0=删除
+ *  type: 0=歌曲, 1=mv, 2=歌单, 3=专辑, 4=电台节目, 5=视频, 6=动态, 7=电台
+ *  id: 资源 ID
+ *  content: 发送/回复的内容（删除时不需要）
+ *  commentId: 回复评论的 ID（回复时必填）或删除评论的 ID（删除时必填）
+ */
+export async function commentAction(
+  t: 0 | 1 | 2,
+  type: number,
+  id: number,
+  content?: string,
+  commentId?: number
+): Promise<{ code: number; commentId?: number }> {
+  const params: Record<string, string | number> = { t, type, id };
+  if (content) params.content = content;
+  if (commentId !== undefined) params.commentId = commentId;
+  log.info(TAG, "commentAction()", { t, type, id, hasContent: !!content, commentId });
+  const r = await apiGet("/comment", params);
+  log.info(TAG, "commentAction result", { code: r.code, commentId: r.commentId });
+  return r;
+}

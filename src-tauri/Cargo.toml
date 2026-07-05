@@ -1,6 +1,6 @@
 [package]
 name = "zephyr-music"
-version = "1.0.1"
+version = "1.1.2"
 description = "Zephyr · 现代化本地音乐播放器"
 authors = ["Zephyr"]
 edition = "2021"

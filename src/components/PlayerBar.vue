@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { useSettings } from "@/components/SettingsPanel.vue";
 import { formatTime } from "@/composables/utils";
-import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew, type NewComment } from "@/api/netease";
+import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew, commentAction, type NewComment } from "@/api/netease";
 import type { Song } from "@/types";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
@@ -55,12 +55,47 @@ watch(() => _cachedUser.value, async (user) => {
 const showCommentsPopup = ref(false);
 const songComments = ref<NewComment[]>([]);
 const commentCount = ref(0);
-const commentSortType = ref<1 | 2 | 3>(2); // 默认按热度排序
+const commentSortType = ref<1 | 2 | 3>(1); // 默认按推荐排序
 const commentLoading = ref(false);
 const commentPageNo = ref(1);
 const commentCursor = ref<number | undefined>(undefined);
 const commentHasMore = ref(false);
 const SORT_LABELS: Record<1 | 2 | 3, string> = { 1: "推荐", 2: "热度", 3: "时间" };
+
+// 发送/回复/删除评论
+const commentInput = ref("");
+const replyTo = ref<NewComment | null>(null); // 回复目标评论
+const sendingComment = ref(false);
+
+/** 格式化评论数量为 k/w/m */
+function formatCommentCount(n: number): string {
+  if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "m";
+  if (n >= 10000) return (n / 10000).toFixed(1).replace(/\.0$/, "") + "w";
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+  return String(n);
+}
+
+/** 评论数量角标（按钮右上角显示） */
+const commentBadge = computed(() => {
+  if (!commentCount.value) return "";
+  return formatCommentCount(commentCount.value);
+});
+
+/** 预加载评论数量（不打开弹窗时也获取） */
+async function preloadCommentCount() {
+  const song = store.currentSong;
+  if (!song || song.source !== "netease" || !song.neteaseId) { commentCount.value = 0; return; }
+  try {
+    const res = await commentNew(song.neteaseId, 0, 1, 1, 1);
+    commentCount.value = res.totalCount || 0;
+  } catch { /* ignore */ }
+}
+
+// 歌曲变化时预加载评论数量
+watch(() => store.currentSong?.id, () => {
+  commentCount.value = 0;
+  preloadCommentCount();
+}, { immediate: true });
 
 async function openCommentsPopup() {
   const song = store.currentSong;
@@ -107,6 +142,53 @@ function onCommentsScroll(e: Event) {
   const el = e.target as HTMLElement;
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50 && commentHasMore.value && !commentLoading.value) {
     loadComments(false);
+  }
+}
+
+/** 发送评论（或回复） */
+async function sendComment() {
+  const song = store.currentSong;
+  if (!song || !song.neteaseId || !commentInput.value.trim()) return;
+  sendingComment.value = true;
+  try {
+    const t = replyTo.value ? 2 : 1; // 1=发送, 2=回复
+    const commentId = replyTo.value?.commentId;
+    const res = await commentAction(t, 0, song.neteaseId, commentInput.value.trim(), commentId);
+    if (res.code === 200) {
+      commentInput.value = "";
+      replyTo.value = null;
+      // 重新加载评论
+      await loadComments(true);
+    }
+  } catch (e) {
+    log.warn("player", "send comment failed", { error: String(e) });
+  }
+  sendingComment.value = false;
+}
+
+/** 设置回复目标 */
+function setReplyTo(comment: NewComment) {
+  replyTo.value = comment;
+}
+
+/** 取消回复 */
+function cancelReply() {
+  replyTo.value = null;
+}
+
+/** 删除评论 */
+async function deleteComment(comment: NewComment) {
+  const song = store.currentSong;
+  if (!song || !song.neteaseId) return;
+  try {
+    const res = await commentAction(0, 0, song.neteaseId, undefined, comment.commentId);
+    if (res.code === 200) {
+      // 从列表移除
+      songComments.value = songComments.value.filter(c => c.commentId !== comment.commentId);
+      commentCount.value = Math.max(0, commentCount.value - 1);
+    }
+  } catch (e) {
+    log.warn("player", "delete comment failed", { error: String(e) });
   }
 }
 
@@ -317,7 +399,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         <img v-if="liked" src="/icons/like.svg" alt="liked" class="like-icon" />
         <img v-else src="/icons/not_like.svg" alt="not liked" class="like-icon" />
       </button>
-      <!-- 评论按钮 -->
+      <!-- 评论按钮（右上角显示评论数量角标） -->
       <button
         v-if="store.currentSong?.source === 'netease'"
         class="ctrl-btn comment-btn"
@@ -326,6 +408,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         @click.stop="openCommentsPopup"
       >
         <img src="/icons/comment.svg" alt="comments" class="like-icon" />
+        <span v-if="commentBadge" class="comment-badge">{{ commentBadge }}</span>
       </button>
     </div>
 
@@ -484,10 +567,33 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
               <span v-if="c.ipLocation" class="cp-loc">{{ c.ipLocation }}</span>
             </div>
             <div class="cp-content">{{ c.content }}</div>
-            <div v-if="c.likedCount > 0" class="cp-likes">👍 {{ c.likedCount }}</div>
+            <div class="cp-actions">
+              <button v-if="c.likedCount > 0" class="cp-like-btn">👍 {{ c.likedCount }}</button>
+              <button class="cp-reply-btn" @click="setReplyTo(c)">回复</button>
+              <button class="cp-delete-btn" @click="deleteComment(c)">删除</button>
+            </div>
           </div>
         </div>
         <div v-if="commentLoading && songComments.length" class="cp-loading-more">加载中...</div>
+      </div>
+      <!-- 发送评论输入框 -->
+      <div class="cp-input-area">
+        <div v-if="replyTo" class="cp-reply-hint">
+          <span>回复 @{{ replyTo.user.nickname }}</span>
+          <button class="cp-cancel-reply" @click="cancelReply">×</button>
+        </div>
+        <div class="cp-input-row">
+          <input
+            v-model="commentInput"
+            class="cp-input"
+            :placeholder="replyTo ? `回复 @${replyTo.user.nickname}` : '发送评论...'"
+            @keydown.enter="sendComment"
+            :disabled="sendingComment"
+          />
+          <button class="cp-send-btn" :disabled="!commentInput.trim() || sendingComment" @click="sendComment">
+            {{ sendingComment ? "发送中" : "发送" }}
+          </button>
+        </div>
       </div>
     </aside>
   </Transition>
@@ -685,9 +791,16 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .qp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 
 /* 评论按钮 */
-.comment-btn { width: 28px; height: 28px; color: var(--text-tertiary); flex-shrink: 0; }
+.comment-btn { width: 28px; height: 28px; color: var(--text-tertiary); flex-shrink: 0; position: relative; }
 .comment-btn:hover { color: var(--accent); }
 .comment-btn.active { color: var(--accent); }
+.comment-badge {
+  position: absolute; top: -4px; right: -6px;
+  min-width: 16px; height: 14px; padding: 0 4px;
+  border-radius: 7px; background: var(--accent); color: #fff;
+  font-size: 9px; font-weight: 700; line-height: 14px; text-align: center;
+  pointer-events: none;
+}
 
 /* 歌曲评论弹窗 */
 .comments-popup {
@@ -722,12 +835,39 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .cp-item:hover { background: var(--bg-hover); }
 .cp-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
 .cp-body { flex: 1; min-width: 0; }
-.cp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+.cp-header { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
 .cp-user { font-size: 12px; font-weight: 600; color: var(--text); }
-.cp-loc { font-size: 10px; color: var(--text-tertiary); }
+.cp-loc { font-size: 10px; color: var(--text-tertiary); margin-left: auto; }
 .cp-content { font-size: 12px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
-.cp-likes { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+.cp-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.cp-like-btn { font-size: 10px; color: var(--text-tertiary); }
+.cp-reply-btn, .cp-delete-btn { font-size: 10px; color: var(--text-tertiary); transition: color 0.15s; }
+.cp-reply-btn:hover { color: var(--accent); }
+.cp-delete-btn:hover { color: #ff4d4f; }
 .cp-loading-more { padding: 10px; text-align: center; font-size: 11px; color: var(--text-tertiary); }
+/* 发送评论输入区 */
+.cp-input-area { border-top: 1px solid var(--border); padding: 8px 12px; flex-shrink: 0; }
+.cp-reply-hint {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 8px; margin-bottom: 6px; border-radius: 6px;
+  background: var(--bg-elev-1); font-size: 11px; color: var(--text-secondary);
+}
+.cp-cancel-reply { width: 18px; height: 18px; border-radius: 50%; color: var(--text-tertiary); font-size: 14px; line-height: 1; }
+.cp-cancel-reply:hover { color: var(--text); background: var(--bg-hover); }
+.cp-input-row { display: flex; gap: 8px; }
+.cp-input {
+  flex: 1; height: 32px; padding: 0 10px; border-radius: 8px;
+  background: var(--bg-elev-1); border: 1px solid var(--border);
+  color: var(--text); font-size: 12px; transition: border-color 0.15s;
+}
+.cp-input:focus { outline: none; border-color: var(--accent); }
+.cp-input::placeholder { color: var(--text-tertiary); }
+.cp-send-btn {
+  padding: 0 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  background: var(--accent); color: #fff; transition: opacity 0.15s;
+}
+.cp-send-btn:hover:not(:disabled) { opacity: 0.9; }
+.cp-send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* 右键菜单 */
 .ctx-menu { position: fixed; z-index: 500; min-width: 170px; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 4px; }
