@@ -6,7 +6,7 @@ import {
   getCachedUser, getCachedPlaylists,
   neteaseSongToSong, getCookie, _cachedUser,
   likeSong, playlistTracks, getCachedLikeList, addLikeCache, removeLikeCache,
-  playlistDetail, playlistDetailDynamic, commentPlaylist, playlistSubscribers,
+  playlistDetail, playlistDetailDynamic, commentPlaylist, playlistSubscribers, commentNew, type NewComment,
   type NeteasePlaylist, type PlaylistComment, type PlaylistSubscriber,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
@@ -94,7 +94,9 @@ async function selectPlaylist(pl: NeteasePlaylist) {
   playlistDynamic.value = null;
   playlistComments.value = [];
   playlistSubs.value = [];
-  commentOffset.value = 0;
+  commentPageNo.value = 1;
+  commentCursor.value = undefined;
+  commentHasMore.value = false;
   subsOffset.value = 0;
   activeDetailTab.value = "songs";
   loadingSongs.value = true;
@@ -218,7 +220,9 @@ async function loadPlaylistById(id: number) {
   playlistDynamic.value = null;
   playlistComments.value = [];
   playlistSubs.value = [];
-  commentOffset.value = 0;
+  commentPageNo.value = 1;
+  commentCursor.value = undefined;
+  commentHasMore.value = false;
   subsOffset.value = 0;
   activeDetailTab.value = "songs";
   try {
@@ -246,10 +250,13 @@ async function loadPlaylistById(id: number) {
 /** 歌单详情数据 */
 const playlistDesc = ref("");
 const playlistDynamic = ref<{ commentCount: number; playCount: number; bookedCount: number; shareCount: number } | null>(null);
-const playlistComments = ref<PlaylistComment[]>([]);
+const playlistComments = ref<NewComment[]>([]);
 const playlistSubs = ref<PlaylistSubscriber[]>([]);
 const activeDetailTab = ref<"songs" | "comments" | "subscribers">("songs");
-const commentOffset = ref(0);
+const commentPageNo = ref(1);
+const commentCursor = ref<number | undefined>(undefined);
+const commentSortType = ref<1 | 2 | 3>(2); // 默认按热度排序
+const commentHasMore = ref(false);
 const subsOffset = ref(0);
 const loadingComments = ref(false);
 const loadingSubs = ref(false);
@@ -257,6 +264,8 @@ const loadingSubs = ref(false);
 const commentTotal = ref(0);
 /** 收藏者总数 */
 const subsTotal = ref(0);
+/** 评论排序标签 */
+const SORT_LABELS: Record<1 | 2 | 3, string> = { 1: "推荐", 2: "热度", 3: "时间" };
 
 /** 后台加载歌单详情动态、评论、收藏者 */
 async function loadPlaylistExtra(id: number) {
@@ -280,17 +289,28 @@ async function loadPlaylistExtra(id: number) {
 
 async function loadComments(id: number, reset = false) {
   if (loadingComments.value) return;
-  if (reset) { commentOffset.value = 0; playlistComments.value = []; commentTotal.value = 0; }
+  if (reset) {
+    commentPageNo.value = 1; playlistComments.value = []; commentTotal.value = 0;
+    commentCursor.value = undefined; commentHasMore.value = false;
+  }
   loadingComments.value = true;
   try {
-    const res = await commentPlaylist(id, 20, commentOffset.value);
-    const newComments = [...(res.hotComments || []), ...(res.comments || [])];
-    if (reset) playlistComments.value = newComments;
+    const res = await commentNew(id, 2, commentSortType.value, commentPageNo.value, 20, commentCursor.value);
+    if (reset) playlistComments.value = res.comments || [];
     else playlistComments.value.push(...(res.comments || []));
-    commentOffset.value += 20;
-    if (res.total) commentTotal.value = res.total;
+    commentTotal.value = res.totalCount || 0;
+    commentHasMore.value = !!res.hasMore;
+    commentCursor.value = res.cursor;
+    if (commentHasMore.value) commentPageNo.value += 1;
   } catch { /* ignore */ }
   loadingComments.value = false;
+}
+
+/** 切换评论排序方式 */
+async function switchCommentSort(sort: 1 | 2 | 3) {
+  if (commentSortType.value === sort) return;
+  commentSortType.value = sort;
+  if (selectedPlaylistId.value) await loadComments(selectedPlaylistId.value, true);
 }
 
 async function loadSubscribers(id: number, reset = false) {
@@ -581,7 +601,14 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </div>
         <!-- 评论列表 -->
         <div v-else-if="activeDetailTab === 'comments'" class="comments-list">
-          <div v-if="commentTotal" class="list-total-header">共 {{ formatCount(commentTotal) }} 条评论</div>
+          <div v-if="commentTotal" class="list-total-header">
+            <span>共 {{ formatCount(commentTotal) }} 条评论</span>
+            <div class="comment-sort-bar">
+              <button v-for="s in ([1,2,3] as const)" :key="s"
+                class="comment-sort-btn" :class="{ active: commentSortType === s }"
+                @click="switchCommentSort(s)">{{ SORT_LABELS[s] }}</button>
+            </div>
+          </div>
           <div v-if="loadingComments && !playlistComments.length" class="songs-loading">加载评论中...</div>
           <div v-else-if="!playlistComments.length" class="songs-empty"><p>暂无评论</p></div>
           <div v-for="c in playlistComments" :key="c.commentId" class="comment-item">
@@ -589,11 +616,13 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
             <div class="comment-body">
               <div class="comment-header">
                 <span class="comment-user">{{ c.user.nickname }}</span>
+                <span v-if="c.ipLocation" class="comment-loc">{{ c.ipLocation }}</span>
                 <span v-if="c.likedCount > 0" class="comment-likes">👍 {{ c.likedCount }}</span>
               </div>
               <div class="comment-content">{{ c.content }}</div>
             </div>
           </div>
+          <div v-if="loadingComments && playlistComments.length" class="songs-loading">加载中...</div>
         </div>
         <!-- 收藏者列表 -->
         <div v-else-if="activeDetailTab === 'subscribers'" class="subs-list">
@@ -747,12 +776,17 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 /* 评论 */
 .comments-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 16px; }
-.list-total-header { font-size: 12px; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.list-total-header { font-size: 12px; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
+.comment-sort-bar { display: flex; gap: 4px; }
+.comment-sort-btn { padding: 3px 10px; border-radius: 12px; font-size: 11px; color: var(--text-tertiary); background: var(--bg-elev-1); transition: all 0.15s; }
+.comment-sort-btn:hover { color: var(--text); }
+.comment-sort-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
 .comment-item { display: flex; gap: 12px; }
 .comment-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
 .comment-body { flex: 1; min-width: 0; }
-.comment-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.comment-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .comment-user { font-size: 13px; font-weight: 600; color: var(--text); }
+.comment-loc { font-size: 10px; color: var(--text-tertiary); margin-left: auto; }
 .comment-likes { font-size: 11px; color: var(--text-tertiary); }
 .comment-content { font-size: 13px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
 /* 收藏者 */

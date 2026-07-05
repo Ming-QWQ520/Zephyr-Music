@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { useSettings } from "@/components/SettingsPanel.vue";
 import { formatTime } from "@/composables/utils";
-import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser } from "@/api/netease";
+import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew, type NewComment } from "@/api/netease";
 import type { Song } from "@/types";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
@@ -50,6 +50,65 @@ watch(() => _cachedUser.value, async (user) => {
     try { await refreshLikeList(user.userId); } catch { /* ignore */ }
   }
 }, { immediate: true });
+
+// ===== 歌曲评论弹窗 =====
+const showCommentsPopup = ref(false);
+const songComments = ref<NewComment[]>([]);
+const commentCount = ref(0);
+const commentSortType = ref<1 | 2 | 3>(2); // 默认按热度排序
+const commentLoading = ref(false);
+const commentPageNo = ref(1);
+const commentCursor = ref<number | undefined>(undefined);
+const commentHasMore = ref(false);
+const SORT_LABELS: Record<1 | 2 | 3, string> = { 1: "推荐", 2: "热度", 3: "时间" };
+
+async function openCommentsPopup() {
+  const song = store.currentSong;
+  if (!song || song.source !== "netease" || !song.neteaseId) return;
+  showCommentsPopup.value = true;
+  await loadComments(true);
+}
+
+async function loadComments(reset = false) {
+  const song = store.currentSong;
+  if (!song || !song.neteaseId) return;
+  if (commentLoading.value) return;
+  if (reset) {
+    songComments.value = [];
+    commentPageNo.value = 1;
+    commentCursor.value = undefined;
+    commentCount.value = 0;
+  }
+  commentLoading.value = true;
+  try {
+    const res = await commentNew(
+      song.neteaseId, 0, commentSortType.value,
+      commentPageNo.value, 20, commentCursor.value
+    );
+    if (reset) songComments.value = res.comments || [];
+    else songComments.value.push(...(res.comments || []));
+    commentCount.value = res.totalCount || 0;
+    commentHasMore.value = !!res.hasMore;
+    commentCursor.value = res.cursor;
+    if (commentHasMore.value) commentPageNo.value += 1;
+  } catch (e) {
+    log.warn("player", "load comments failed", { error: String(e) });
+  }
+  commentLoading.value = false;
+}
+
+async function switchCommentSort(sort: 1 | 2 | 3) {
+  if (commentSortType.value === sort) return;
+  commentSortType.value = sort;
+  await loadComments(true);
+}
+
+function onCommentsScroll(e: Event) {
+  const el = e.target as HTMLElement;
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50 && commentHasMore.value && !commentLoading.value) {
+    loadComments(false);
+  }
+}
 
 type PlayMode = "sequence" | "list" | "single" | "shuffle";
 
@@ -212,7 +271,7 @@ function onVolWheel(e: WheelEvent) {
   volHover.value = true;
 }
 
-// 点击外部关闭音质弹窗、播放队列弹窗和右键菜单
+// 点击外部关闭音质弹窗、播放队列弹窗、评论弹窗和右键菜单
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement;
   if (levelPopupOpen.value && target && !target.closest(".level-wrap")) {
@@ -220,6 +279,9 @@ function onDocClick(e: MouseEvent) {
   }
   if (showQueuePopup.value && target && !target.closest(".center-block") && !target.closest(".queue-popup")) {
     showQueuePopup.value = false;
+  }
+  if (showCommentsPopup.value && target && !target.closest(".comments-popup") && !target.closest(".comment-btn")) {
+    showCommentsPopup.value = false;
   }
   if (queueCtxMenu.value.visible && target && !target.closest(".ctx-menu")) {
     closeQueueCtxMenu();
@@ -254,6 +316,16 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       >
         <img v-if="liked" src="/icons/like.svg" alt="liked" class="like-icon" />
         <img v-else src="/icons/not_like.svg" alt="not liked" class="like-icon" />
+      </button>
+      <!-- 评论按钮 -->
+      <button
+        v-if="store.currentSong?.source === 'netease'"
+        class="ctrl-btn comment-btn"
+        :class="{ active: showCommentsPopup }"
+        title="歌曲评论"
+        @click.stop="openCommentsPopup"
+      >
+        <img src="/icons/comment.svg" alt="comments" class="like-icon" />
       </button>
     </div>
 
@@ -376,6 +448,48 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       <div class="ctx-divider" />
       <button class="ctx-item ctx-danger" @click="queueCtxRemove"><Icon name="trash" :size="14" /><span>从列表中移除</span></button>
     </div>
+  </Transition>
+
+  <!-- 歌曲评论弹窗（从右侧弹出） -->
+  <Transition name="queue-slide">
+    <aside v-if="showCommentsPopup" class="comments-popup" @click.stop>
+      <header class="cp-head">
+        <h3>歌曲评论</h3>
+        <span class="cp-count" v-if="commentCount">{{ commentCount >= 10000 ? (commentCount / 10000).toFixed(1) + '万' : commentCount }} 条</span>
+        <button class="icon-btn" title="关闭" @click="showCommentsPopup = false">
+          <Icon name="close" :size="18" />
+        </button>
+      </header>
+      <!-- 排序方式 -->
+      <div class="cp-sort-bar">
+        <button v-for="s in ([1,2,3] as const)" :key="s"
+          class="cp-sort-btn" :class="{ active: commentSortType === s }"
+          @click="switchCommentSort(s)">{{ SORT_LABELS[s] }}</button>
+      </div>
+      <!-- 加载中 -->
+      <div v-if="commentLoading && !songComments.length" class="cp-loading">
+        <div class="spinner" />
+      </div>
+      <!-- 评论列表 -->
+      <div v-else class="cp-list nice-scroll" @scroll="onCommentsScroll">
+        <div v-if="!songComments.length && !commentLoading" class="cp-empty">
+          <Icon name="list" :size="32" />
+          <p>暂无评论</p>
+        </div>
+        <div v-for="c in songComments" :key="c.commentId" class="cp-item">
+          <img v-if="c.user.avatarUrl" :src="c.user.avatarUrl + '?param=50x50'" class="cp-avatar" referrerpolicy="no-referrer" loading="lazy" />
+          <div class="cp-body">
+            <div class="cp-header">
+              <span class="cp-user">{{ c.user.nickname }}</span>
+              <span v-if="c.ipLocation" class="cp-loc">{{ c.ipLocation }}</span>
+            </div>
+            <div class="cp-content">{{ c.content }}</div>
+            <div v-if="c.likedCount > 0" class="cp-likes">👍 {{ c.likedCount }}</div>
+          </div>
+        </div>
+        <div v-if="commentLoading && songComments.length" class="cp-loading-more">加载中...</div>
+      </div>
+    </aside>
   </Transition>
 </template>
 
@@ -569,6 +683,51 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 /* 队列加载转圈 */
 .qp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
 .qp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+
+/* 评论按钮 */
+.comment-btn { width: 28px; height: 28px; color: var(--text-tertiary); flex-shrink: 0; }
+.comment-btn:hover { color: var(--accent); }
+.comment-btn.active { color: var(--accent); }
+
+/* 歌曲评论弹窗 */
+.comments-popup {
+  position: fixed; right: 16px; bottom: calc(var(--playerbar-h) + 12px);
+  z-index: 600; width: 380px; max-width: calc(100vw - 32px);
+  max-height: 60vh; background: var(--bg-elev-3);
+  border: 1px solid var(--border-strong); border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.cp-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+}
+.cp-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.cp-count { font-size: 11px; color: var(--text-tertiary); }
+.cp-head .icon-btn { margin-left: auto; width: 28px; height: 28px; color: var(--text-tertiary); }
+.cp-head .icon-btn:hover { color: var(--text); }
+.cp-sort-bar { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.cp-sort-btn {
+  padding: 4px 12px; border-radius: 12px; font-size: 11px;
+  color: var(--text-tertiary); background: var(--bg-elev-1);
+  transition: all 0.15s;
+}
+.cp-sort-btn:hover { color: var(--text); }
+.cp-sort-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
+.cp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
+.cp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.cp-list { flex: 1; overflow-y: auto; padding: 8px; }
+.cp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-tertiary); font-size: 12px; }
+.cp-item { display: flex; gap: 10px; padding: 10px 8px; border-radius: 8px; transition: background 0.1s; }
+.cp-item:hover { background: var(--bg-hover); }
+.cp-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
+.cp-body { flex: 1; min-width: 0; }
+.cp-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px; }
+.cp-user { font-size: 12px; font-weight: 600; color: var(--text); }
+.cp-loc { font-size: 10px; color: var(--text-tertiary); }
+.cp-content { font-size: 12px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
+.cp-likes { font-size: 11px; color: var(--text-tertiary); margin-top: 4px; }
+.cp-loading-more { padding: 10px; text-align: center; font-size: 11px; color: var(--text-tertiary); }
 
 /* 右键菜单 */
 .ctx-menu { position: fixed; z-index: 500; min-width: 170px; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 4px; }
