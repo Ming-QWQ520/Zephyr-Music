@@ -812,26 +812,25 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   pointer-events: none;
 }
 
-/* 歌曲评论弹窗 */
+/* 歌曲评论弹窗（全屏） */
 .comments-popup {
-  position: fixed; right: 16px; bottom: calc(var(--playerbar-h) + 12px);
-  z-index: 600; width: 380px; max-width: calc(100vw - 32px);
-  max-height: 60vh; background: var(--bg-elev-3);
-  border: 1px solid var(--border-strong); border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+  position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+  z-index: 600; width: 100vw; height: 100vh;
+  background: var(--bg-elev-3);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .cp-head {
   display: flex; align-items: center; gap: 8px;
-  padding: 14px 16px 10px; border-bottom: 1px solid var(--border);
+  padding: 16px 24px 14px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
-.cp-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
-.cp-count { font-size: 11px; color: var(--text-tertiary); }
-.cp-head .icon-btn { margin-left: auto; width: 28px; height: 28px; color: var(--text-tertiary); }
+.cp-head h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.cp-count { font-size: 12px; color: var(--text-tertiary); }
+.cp-head .icon-btn { margin-left: auto; width: 32px; height: 32px; color: var(--text-tertiary); }
 .cp-head .icon-btn:hover { color: var(--text); }
-.cp-sort-bar { display: flex; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.cp-sort-bar { display: flex; gap: 4px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .cp-sort-btn {
-  padding: 4px 12px; border-radius: 12px; font-size: 11px;
+  padding: 6px 16px; border-radius: 14px; font-size: 12px;
   color: var(--text-tertiary); background: var(--bg-elev-1);
   transition: all 0.15s;
 }
@@ -839,41 +838,41 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .cp-sort-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
 .cp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
 .cp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
-.cp-list { flex: 1; overflow-y: auto; padding: 8px; }
-.cp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-tertiary); font-size: 12px; }
-.cp-item { display: flex; gap: 10px; padding: 10px 8px; border-radius: 8px; transition: background 0.1s; }
+.cp-list { flex: 1; overflow-y: auto; padding: 8px 24px; max-width: 800px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+.cp-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; color: var(--text-tertiary); font-size: 14px; }
+.cp-item { display: flex; gap: 12px; padding: 12px 8px; border-radius: 8px; transition: background 0.1s; }
 .cp-item:hover { background: var(--bg-hover); }
-.cp-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
+.cp-avatar { width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0; object-fit: cover; }
 .cp-body { flex: 1; min-width: 0; }
-.cp-header { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
-.cp-user { font-size: 12px; font-weight: 600; color: var(--text); }
-.cp-loc { font-size: 10px; color: var(--text-tertiary); margin-left: auto; }
-.cp-content { font-size: 12px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
-.cp-actions { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
-.cp-like-btn { font-size: 10px; color: var(--text-tertiary); }
-.cp-reply-btn, .cp-delete-btn { font-size: 10px; color: var(--text-tertiary); transition: color 0.15s; }
+.cp-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.cp-user { font-size: 13px; font-weight: 600; color: var(--text); }
+.cp-loc { font-size: 11px; color: var(--text-tertiary); margin-left: auto; }
+.cp-content { font-size: 13px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
+.cp-actions { display: flex; align-items: center; gap: 12px; margin-top: 6px; }
+.cp-like-btn { font-size: 11px; color: var(--text-tertiary); }
+.cp-reply-btn, .cp-delete-btn { font-size: 11px; color: var(--text-tertiary); transition: color 0.15s; }
 .cp-reply-btn:hover { color: var(--accent); }
 .cp-delete-btn:hover { color: #ff4d4f; }
 .cp-loading-more { padding: 10px; text-align: center; font-size: 11px; color: var(--text-tertiary); }
 /* 发送评论输入区 */
-.cp-input-area { border-top: 1px solid var(--border); padding: 8px 12px; flex-shrink: 0; }
+.cp-input-area { border-top: 1px solid var(--border); padding: 10px 24px; flex-shrink: 0; max-width: 800px; margin: 0 auto; width: 100%; box-sizing: border-box; }
 .cp-reply-hint {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 4px 8px; margin-bottom: 6px; border-radius: 6px;
-  background: var(--bg-elev-1); font-size: 11px; color: var(--text-secondary);
+  padding: 6px 10px; margin-bottom: 8px; border-radius: 6px;
+  background: var(--bg-elev-1); font-size: 12px; color: var(--text-secondary);
 }
-.cp-cancel-reply { width: 18px; height: 18px; border-radius: 50%; color: var(--text-tertiary); font-size: 14px; line-height: 1; }
+.cp-cancel-reply { width: 20px; height: 20px; border-radius: 50%; color: var(--text-tertiary); font-size: 16px; line-height: 1; }
 .cp-cancel-reply:hover { color: var(--text); background: var(--bg-hover); }
 .cp-input-row { display: flex; gap: 8px; }
 .cp-input {
-  flex: 1; height: 32px; padding: 0 10px; border-radius: 8px;
+  flex: 1; height: 38px; padding: 0 12px; border-radius: 8px;
   background: var(--bg-elev-1); border: 1px solid var(--border);
-  color: var(--text); font-size: 12px; transition: border-color 0.15s;
+  color: var(--text); font-size: 13px; transition: border-color 0.15s;
 }
 .cp-input:focus { outline: none; border-color: var(--accent); }
 .cp-input::placeholder { color: var(--text-tertiary); }
 .cp-send-btn {
-  padding: 0 14px; border-radius: 8px; font-size: 12px; font-weight: 600;
+  padding: 0 18px; border-radius: 8px; font-size: 13px; font-weight: 600;
   background: var(--accent); color: #fff; transition: opacity 0.15s;
 }
 .cp-send-btn:hover:not(:disabled) { opacity: 0.9; }

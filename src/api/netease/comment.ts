@@ -27,6 +27,7 @@ export interface NewComment {
   content: string;
   time: number;
   likedCount: number;
+  /** 评论者所在地（从 ipLocation.location 提取的纯字符串） */
   ipLocation?: string;
   user: { userId: number; nickname: string; avatarUrl: string };
 }
@@ -34,7 +35,7 @@ export interface NewComment {
 export async function commentNew(
   id: number,
   type: number,
-  sortType: 1 | 2 | 3 = 2,
+  sortType: 1 | 2 | 3 = 1,
   pageNo = 1,
   pageSize = 20,
   cursor?: number
@@ -49,15 +50,33 @@ export async function commentNew(
   const params: Record<string, string | number> = { id, type, sortType, pageNo, pageSize };
   if (cursor !== undefined && sortType === 3) params.cursor = cursor;
   log.info(TAG, "commentNew()", { id, type, sortType, pageNo, pageSize, cursor });
-  const r = await apiGet("/comment/new", params);
-  // apiGet 已解包 data 层，r 直接就是 { comments, totalCount, hasMore, cursor, ... }
+  const r = await apiGet<{
+    code: number;
+    totalCount?: number;
+    comments?: any[];
+    hasMore?: boolean;
+    cursor?: number;
+  }>("/comment/new", params);
+  // 提取 ipLocation.location 字符串（API 返回的是 {ip, location, userId} 对象）
+  const comments: NewComment[] = (r.comments || []).map((c: any) => ({
+    commentId: c.commentId,
+    content: c.content,
+    time: c.time,
+    likedCount: c.likedCount || 0,
+    ipLocation: c.ipLocation?.location || c.user?.locationInfo?.location || "",
+    user: {
+      userId: c.user?.userId || 0,
+      nickname: c.user?.nickname || "未知用户",
+      avatarUrl: c.user?.avatarUrl || "",
+    },
+  }));
   log.info(TAG, "commentNew result", {
     code: r.code,
     totalCount: r.totalCount,
-    count: r.comments?.length || 0,
+    count: comments.length,
     hasMore: r.hasMore,
   });
-  return r;
+  return { code: r.code, totalCount: r.totalCount, comments, hasMore: r.hasMore, cursor: r.cursor };
 }
 
 /** 歌单收藏者（/playlist/subscribers） */
