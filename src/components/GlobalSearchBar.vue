@@ -59,7 +59,7 @@ function onGlobalKeydown(ev: KeyboardEvent) {
 
 <template>
   <div class="search-bar">
-    <button v-if="store.canGoBack" class="back-btn" @click="goBack" title="返回">
+    <button class="back-btn" @click="goBack" title="返回" :disabled="!store.canGoBack">
       <Icon name="chevronLeft" :size="18" />
     </button>
     <Icon name="search" :size="16" class="search-icon" />
@@ -95,6 +95,8 @@ function onGlobalKeydown(ev: KeyboardEvent) {
 .search-icon { color: var(--text-tertiary); flex-shrink: 0; }
 .back-btn { width: 28px; height: 28px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: color 0.15s, background 0.15s; flex-shrink: 0; }
 .back-btn:hover { color: var(--text); background: var(--bg-hover); }
+.back-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.back-btn:disabled:hover { color: var(--text-secondary); background: transparent; }
 .search-input {
   flex: 1;
   background: transparent;

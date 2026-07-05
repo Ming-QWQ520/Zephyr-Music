@@ -14,6 +14,7 @@ import NeteaseView from "@/components/NeteaseView.vue";
 import QueueView from "@/components/QueueView.vue";
 import LibraryView from "@/components/LibraryView.vue";
 import RecommendView from "@/components/RecommendView.vue";
+import SongCommentsView from "@/components/SongCommentsView.vue";
 import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
 import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
@@ -222,6 +223,7 @@ onUnmounted(() => {
         <RecommendView v-else-if="store.currentView === 'recommend'" />
         <QueueView v-else-if="store.currentView === 'queue'" />
         <LibraryView v-else-if="store.currentView === 'library'" />
+        <SongCommentsView v-else-if="store.currentView === 'songcomments'" />
         <div v-else class="placeholder-view">
           <Icon name="music" :size="48" />
           <p>选择一首歌开始播放</p>
