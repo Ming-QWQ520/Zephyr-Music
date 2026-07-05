@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import Icon from "@/components/Icon.vue";
 
@@ -24,11 +24,40 @@ function remove(index: number) {
 }
 
 function clear() {
-  store.queue = [];
-  store.currentIndex = -1;
-  store.setPlaying(false);
-  store.lyrics = [];
-  store.activeLyricIndex = -1;
+  store.clearQueue();
+}
+
+// ===== 拖拽排序 =====
+const dragFromIdx = ref<number | null>(null);
+const dragOverIdx = ref<number | null>(null);
+
+function onDragStart(e: DragEvent, idx: number) {
+  dragFromIdx.value = idx;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(idx));
+  }
+}
+function onDragOver(e: DragEvent, idx: number) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  dragOverIdx.value = idx;
+}
+function onDragLeave() {
+  // 不立即清空，避免抖动
+}
+function onDrop(e: DragEvent, idx: number) {
+  e.preventDefault();
+  const from = dragFromIdx.value;
+  if (from !== null && from !== idx) {
+    store.moveInQueue(from, idx);
+  }
+  dragFromIdx.value = null;
+  dragOverIdx.value = null;
+}
+function onDragEnd() {
+  dragFromIdx.value = null;
+  dragOverIdx.value = null;
 }
 </script>
 
@@ -58,9 +87,18 @@ function clear() {
         v-for="(song, idx) in queue"
         :key="song.id"
         class="row"
-        :class="{ active: song.id === currentId, playing: song.id === currentId && store.isPlaying }"
+        :class="{ active: song.id === currentId, playing: song.id === currentId && store.isPlaying, 'drag-over': dragOverIdx === idx && dragFromIdx !== idx, dragging: dragFromIdx === idx }"
+        draggable="true"
         @dblclick="play(idx)"
+        @dragstart="onDragStart($event, idx)"
+        @dragover="onDragOver($event, idx)"
+        @dragleave="onDragLeave"
+        @drop="onDrop($event, idx)"
+        @dragend="onDragEnd"
       >
+        <div class="drag-handle" title="拖拽排序">
+          <Icon name="grip" :size="14" />
+        </div>
         <div class="idx-cell" @click="play(idx)">
           <span v-if="song.id !== currentId" class="idx">{{ idx + 1 }}</span>
           <template v-else>
@@ -163,7 +201,7 @@ function clear() {
   gap: 12px;
   padding: 6px 10px;
   border-radius: 8px;
-  transition: background 0.12s;
+  transition: background 0.12s, opacity 0.12s, transform 0.12s;
   cursor: default;
 }
 .row:hover {
@@ -171,6 +209,34 @@ function clear() {
 }
 .row.active {
   background: var(--bg-active);
+}
+.row.dragging {
+  opacity: 0.4;
+}
+.row.drag-over {
+  border-top: 2px solid var(--accent);
+  padding-top: 4px;
+}
+.drag-handle {
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.row:hover .drag-handle {
+  opacity: 0.6;
+}
+.drag-handle:hover {
+  opacity: 1 !important;
+  color: var(--text-secondary);
+}
+.drag-handle:active {
+  cursor: grabbing;
 }
 .idx-cell {
   width: 28px;

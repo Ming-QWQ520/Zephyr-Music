@@ -142,6 +142,29 @@ const showQueuePopup = ref(false);
 const queueList = computed(() => store.queue);
 const queueLoading = ref(false);
 
+// 播放队列拖拽排序
+const dragFromIdx = ref<number | null>(null);
+const dragOverIdx = ref<number | null>(null);
+function onQueueDragStart(e: DragEvent, idx: number) {
+  dragFromIdx.value = idx;
+  if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", String(idx)); }
+}
+function onQueueDragOver(e: DragEvent, idx: number) {
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+  dragOverIdx.value = idx;
+}
+function onQueueDrop(e: DragEvent, idx: number) {
+  e.preventDefault();
+  const from = dragFromIdx.value;
+  if (from !== null && from !== idx) store.moveInQueue(from, idx);
+  dragFromIdx.value = null; dragOverIdx.value = null;
+}
+function onQueueDragEnd() { dragFromIdx.value = null; dragOverIdx.value = null; }
+
+/** 清空播放队列 */
+function clearQueue() { store.clearQueue(); }
+
 /** 打开播放队列弹窗（先转圈1秒） */
 function toggleQueuePopup() {
   if (showQueuePopup.value) {
@@ -301,6 +324,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       <header class="qp-head">
         <h3>播放队列</h3>
         <span class="qp-count">{{ queueList.length }} 首</span>
+        <button v-if="queueList.length" class="qp-clear-btn" title="清空播放队列" @click="clearQueue">
+          <Icon name="trash" :size="14" />
+          <span>清空</span>
+        </button>
         <button class="icon-btn" title="关闭" @click="showQueuePopup = false">
           <Icon name="close" :size="18" />
         </button>
@@ -310,14 +337,22 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         <div class="spinner" />
       </div>
       <div v-else class="qp-list nice-scroll">
-        <button
+        <div
           v-for="(s, idx) in queueList"
           :key="s.id"
           class="qp-item"
-          :class="{ active: s.id === store.currentSong?.id }"
+          :class="{ active: s.id === store.currentSong?.id, 'drag-over': dragOverIdx === idx && dragFromIdx !== idx, dragging: dragFromIdx === idx }"
+          draggable="true"
           @click="() => { store.currentIndex = idx; store.setPlaying(true); const song = store.queue[idx]; if (song) store.loadLyrics(song); }"
           @contextmenu.prevent="onQueueContextMenu($event, s, idx)"
+          @dragstart="onQueueDragStart($event, idx)"
+          @dragover="onQueueDragOver($event, idx)"
+          @drop="onQueueDrop($event, idx)"
+          @dragend="onQueueDragEnd"
         >
+          <div class="qp-drag-handle" title="拖拽排序">
+            <Icon name="grip" :size="12" />
+          </div>
           <div class="qp-cover">
             <img v-if="s.pic" :src="s.pic" :alt="s.name" referrerpolicy="no-referrer" loading="lazy" />
             <Icon v-else name="music" :size="14" />
@@ -327,7 +362,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
             <div class="qp-artist truncate">{{ s.artist }}</div>
           </div>
           <Icon v-if="s.id === store.currentSong?.id && store.isPlaying" name="volume" :size="14" class="qp-now" />
-        </button>
+        </div>
       </div>
     </aside>
   </Transition>
@@ -488,17 +523,35 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 }
 .qp-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
 .qp-count { font-size: 11px; color: var(--text-tertiary); }
-.qp-head .icon-btn { margin-left: auto; width: 28px; height: 28px; color: var(--text-tertiary); }
+.qp-clear-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 10px; border-radius: 6px;
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text-tertiary); font-size: 11px; transition: all 0.15s;
+  margin-left: auto;
+}
+.qp-clear-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.qp-head .icon-btn { width: 28px; height: 28px; color: var(--text-tertiary); }
 .qp-head .icon-btn:hover { color: var(--text); }
 .qp-list { flex: 1; overflow-y: auto; padding: 4px; }
 .qp-item {
   display: flex; align-items: center; gap: 10px;
   width: 100%; padding: 7px 10px; border-radius: 8px;
-  text-align: left; transition: background 0.1s;
+  text-align: left; transition: background 0.1s, opacity 0.12s;
+  cursor: default;
 }
 .qp-item:hover { background: var(--bg-hover); }
 .qp-item.active { background: var(--accent-soft); }
 .qp-item.active .qp-title { color: var(--accent); }
+.qp-item.dragging { opacity: 0.4; }
+.qp-item.drag-over { border-top: 2px solid var(--accent); padding-top: 5px; }
+.qp-drag-handle {
+  width: 16px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary); cursor: grab; opacity: 0; transition: opacity 0.15s;
+}
+.qp-item:hover .qp-drag-handle { opacity: 0.5; }
+.qp-drag-handle:hover { opacity: 1 !important; color: var(--text-secondary); }
+.qp-drag-handle:active { cursor: grabbing; }
 .qp-cover {
   width: 36px; height: 36px; border-radius: 6px; flex-shrink: 0;
   background: var(--bg-elev-1); overflow: hidden;

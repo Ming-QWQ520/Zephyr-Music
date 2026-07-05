@@ -229,8 +229,64 @@ export const usePlayerStore = defineStore("player", {
       const idx = this.queue.findIndex(s => s.id === id);
       if (idx >= 0) { this.queue[idx] = { ...this.queue[idx], ...patch }; if (idx === this.currentIndex && patch.lrc) this.loadLyrics(this.queue[idx]); }
     },
-    addToQueue(song: Song) { if (!this.queue.find(s => s.id === song.id)) this.queue.push(song); },
-    playNext(song: Song) { this.queue.splice(this.currentIndex + 1, 0, song); },
+    /** 加入队列末尾（最后一首播放）。如果已存在则移动到末尾，不重复添加。 */
+    addToQueue(song: Song) {
+      const existingIdx = this.queue.findIndex(s => s.id === song.id);
+      if (existingIdx >= 0) {
+        // 已存在：移动到末尾
+        if (existingIdx === this.queue.length - 1) return; // 已在末尾
+        this.queue.splice(existingIdx, 1);
+        // 调整 currentIndex（如果移除的是当前歌曲之前的位置）
+        if (existingIdx < this.currentIndex) this.currentIndex -= 1;
+        else if (existingIdx === this.currentIndex) this.currentIndex = this.queue.length; // 将在 push 后修正
+        this.queue.push(song);
+        if (existingIdx === this.currentIndex) this.currentIndex = this.queue.length - 1;
+      } else {
+        this.queue.push(song);
+      }
+    },
+    /** 下一首播放（插入到当前歌曲后面）。如果已存在则移动到当前位置后面，不重复添加。 */
+    playNext(song: Song) {
+      const existingIdx = this.queue.findIndex(s => s.id === song.id);
+      const insertIdx = this.currentIndex + 1;
+      if (existingIdx >= 0) {
+        // 已存在：移动到当前位置后面
+        if (existingIdx === insertIdx) return; // 已在目标位置
+        // 先移除
+        this.queue.splice(existingIdx, 1);
+        // 调整插入位置：如果移除的在插入位置之前，插入位置减1
+        const adjustedInsert = existingIdx < insertIdx ? insertIdx - 1 : insertIdx;
+        // 调整 currentIndex：如果移除的在当前歌曲之前，currentIndex 减1
+        if (existingIdx < this.currentIndex) this.currentIndex -= 1;
+        this.queue.splice(adjustedInsert, 0, song);
+      } else {
+        this.queue.splice(insertIdx, 0, song);
+      }
+    },
+    /** 拖拽移动队列内歌曲：从 fromIdx 移动到 toIdx */
+    moveInQueue(fromIdx: number, toIdx: number) {
+      if (fromIdx < 0 || fromIdx >= this.queue.length) return;
+      if (toIdx < 0 || toIdx >= this.queue.length) return;
+      if (fromIdx === toIdx) return;
+      const [moved] = this.queue.splice(fromIdx, 1);
+      this.queue.splice(toIdx, 0, moved);
+      // 调整 currentIndex
+      if (fromIdx === this.currentIndex) {
+        this.currentIndex = toIdx;
+      } else if (fromIdx < this.currentIndex && toIdx >= this.currentIndex) {
+        this.currentIndex -= 1;
+      } else if (fromIdx > this.currentIndex && toIdx <= this.currentIndex) {
+        this.currentIndex += 1;
+      }
+    },
+    /** 清空播放队列 */
+    clearQueue() {
+      this.queue = [];
+      this.currentIndex = -1;
+      this.isPlaying = false;
+      this.lyrics = [];
+      this.activeLyricIndex = -1;
+    },
     removeFromQueue(index: number) {
       if (index < 0 || index >= this.queue.length) return;
       const wasCurrent = index === this.currentIndex;
