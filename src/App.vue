@@ -404,6 +404,18 @@ onUnmounted(() => {
   background: var(--bg-elev-3);
   box-shadow: 0 2px 12px rgba(0,0,0,0.25);
 }
+/* 有壁纸时搜索框改为毛玻璃半透明，适应壁纸背景 */
+.app-shell.has-wallpaper .floating-search :deep(.search-bar) {
+  background: rgba(40, 38, 46, 0.55);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+}
+.app-shell.has-wallpaper .floating-search :deep(.search-bar:focus-within) {
+  border-color: var(--accent);
+  background: rgba(50, 48, 56, 0.65);
+}
 
 /* 窗口控件：浮于标题栏右上角，与标题栏剥离 */
 .floating-win-ctrls {
