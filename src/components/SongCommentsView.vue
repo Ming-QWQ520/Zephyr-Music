@@ -4,7 +4,7 @@
  */
 import { ref, computed, watch, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { commentNew, commentAction, type NewComment } from "@/api/netease";
+import { commentNew, commentAction, commentLike, type NewComment } from "@/api/netease";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
 
@@ -134,17 +134,52 @@ async function deleteComment(comment: NewComment) {
   }
 }
 
-/** 切换点赞状态（本地维护，仅 UI 效果） */
-function toggleLike(comment: NewComment) {
-  const id = comment.commentId;
-  if (likedComments.value.has(id)) {
-    likedComments.value.delete(id);
+/** 切换点赞状态（调用 /comment/like API） */
+async function toggleLike(comment: NewComment) {
+  const song = currentSong.value;
+  if (!song || !song.neteaseId) return;
+  const cid = comment.commentId;
+  const wasLiked = likedComments.value.has(cid);
+  // 乐观更新：先切换 UI
+  if (wasLiked) {
+    likedComments.value.delete(cid);
     comment.likedCount = Math.max(0, comment.likedCount - 1);
   } else {
-    likedComments.value.add(id);
+    likedComments.value.add(cid);
     comment.likedCount = (comment.likedCount || 0) + 1;
   }
   likedComments.value = new Set(likedComments.value);
+  try {
+    const res = await commentLike(song.neteaseId, cid, wasLiked ? 0 : 1, 0);
+    if (res.code !== 200) {
+      // 失败：回滚
+      if (wasLiked) {
+        likedComments.value.add(cid);
+        comment.likedCount = (comment.likedCount || 0) + 1;
+      } else {
+        likedComments.value.delete(cid);
+        comment.likedCount = Math.max(0, comment.likedCount - 1);
+      }
+      likedComments.value = new Set(likedComments.value);
+      let errMsg = "点赞失败";
+      if (res.code === 301 || res.code === 302) errMsg = "需要登录";
+      else if (res.msg) errMsg = res.msg;
+      else if (res.message) errMsg = res.message;
+      log.warn("comments", "like failed", { code: res.code });
+      alert(errMsg);
+    }
+  } catch (e) {
+    // 异常：回滚
+    if (wasLiked) {
+      likedComments.value.add(cid);
+      comment.likedCount = (comment.likedCount || 0) + 1;
+    } else {
+      likedComments.value.delete(cid);
+      comment.likedCount = Math.max(0, comment.likedCount - 1);
+    }
+    likedComments.value = new Set(likedComments.value);
+    log.warn("comments", "like error", { error: String(e) });
+  }
 }
 
 function isLiked(commentId: number): boolean {

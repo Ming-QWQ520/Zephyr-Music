@@ -116,3 +116,23 @@ export async function commentAction(
   log.info(TAG, "commentAction result", { code: r.code, commentId: r.commentId, msg: r.msg, dialog: r.dialog?.subtitle });
   return r;
 }
+
+/** 给评论点赞（/comment/like）
+ *  id: 资源 ID（歌曲 ID 等）
+ *  cid: 评论 ID
+ *  t: 1=点赞, 0=取消点赞
+ *  type: 0=歌曲, 1=mv, 2=歌单, 3=专辑, 4=电台节目, 5=视频, 6=动态, 7=电台
+ *  需要登录
+ */
+export async function commentLike(
+  id: number,
+  cid: number,
+  t: 0 | 1,
+  type: number = 0
+): Promise<{ code: number; msg?: string; message?: string }> {
+  const params: Record<string, string | number> = { id, cid, t, type };
+  log.info(TAG, "commentLike()", { id, cid, t, type });
+  const r = await apiPost<{ code: number; msg?: string; message?: string }>("/comment/like", params);
+  log.info(TAG, "commentLike result", { code: r.code, msg: r.msg });
+  return r;
+}
