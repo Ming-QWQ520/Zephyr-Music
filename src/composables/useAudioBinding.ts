@@ -5,7 +5,7 @@ import {
   isLocalFile, rodioPlay, rodioPause, rodioResume, rodioStop,
   rodioSetVolume,
 } from "@/composables/rodioBridge";
-import { scrobbleV1 } from "@/api/netease";
+import { scrobbleV1, scrobble } from "@/api/netease";
 
 export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   const store = usePlayerStore();
@@ -36,6 +36,8 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     lastTickMs: number | null;
     /** 是否正在播放（用于暂停时停止累计） */
     ticking: boolean;
+    /** 是否已调用 /scrobble 记录到最近播放 */
+    scrobbledToRecent: boolean;
   }
   let scrobbleInfo: ScrobbleInfo | null = null;
 
@@ -79,7 +81,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     }
   }
 
-  /** 上报打卡：对当前歌曲调用 /scrobble/v1 */
+  /** 上报打卡：对当前歌曲调用 /scrobble/v1（加密版，同步播放时长到听歌排行） */
   function doScrobble(info: ScrobbleInfo | null, isAutoNext: boolean = false) {
     if (!info) return;
     // 停止计时
@@ -110,6 +112,22 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     });
   }
 
+  /** 记录到最近播放：调用 /scrobble（非加密版，同步到最近播放列表）
+   *  仅在歌曲实际播放超过一定时长（如 10 秒）后调用一次，避免重复 */
+  function scrobbleToRecent(info: ScrobbleInfo | null) {
+    if (!info || info.scrobbledToRecent) return;
+    if (info.accumulatedTime < 10) return; // 播放不足 10 秒不记录到最近播放
+    info.scrobbledToRecent = true;
+    const sourceid = info.sourceid || 0;
+    scrobble(info.neteaseId, sourceid, Math.floor(info.accumulatedTime)).then(() => {
+      log.info(TAG, "scrobble to recent ok", { songId: info.neteaseId, name: info.name, time: Math.floor(info.accumulatedTime) });
+    }).catch((e) => {
+      log.warn(TAG, "scrobble to recent failed", { error: String(e) });
+      // 失败了允许重试
+      info.scrobbledToRecent = false;
+    });
+  }
+
   /** 初始化新歌曲的打卡信息 */
   function initScrobble(song: { neteaseId?: number; name?: string; artist?: string; duration?: number; source?: string } | null) {
     if (!song || song.source !== "netease" || !song.neteaseId) {
@@ -125,6 +143,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       accumulatedTime: 0,
       lastTickMs: null,
       ticking: false,
+      scrobbledToRecent: false,
     };
     log.info(TAG, "scrobble initialized", { songId: song.neteaseId, name: song.name, duration: song.duration });
   }
@@ -175,9 +194,10 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
 
   // 定期同步累计时长（用 store.currentTime 增量）
   let scrobbleTickTimer: ReturnType<typeof setInterval> | null = null;
+  let lastReportedTime = 0;
   function startScrobbleTick() {
     stopScrobbleTick();
-    let lastReportedTime = 0;
+    lastReportedTime = 0;
     scrobbleTickTimer = setInterval(() => {
       if (!scrobbleInfo || !scrobbleInfo.ticking) return;
       const ct = store.currentTime;
@@ -188,6 +208,8 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
           scrobbleInfo.accumulatedTime += (ct - lastReportedTime);
         }
         lastReportedTime = ct;
+        // 播放超过 10 秒后，记录到最近播放（仅一次）
+        scrobbleToRecent(scrobbleInfo);
       }
     }, 1000); // 每秒同步一次
   }
