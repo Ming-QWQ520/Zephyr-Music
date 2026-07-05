@@ -91,12 +91,24 @@ function playDailyRecommend() {
   }
 }
 
-/** 播放私人漫游歌曲 */
+/** 播放私人漫游歌曲（单首播放，不感兴趣换歌） */
 function playPersonalRoam() {
   if (personalRoamSongs.value.length > 0) {
     store.setSourcePlaylistId(null);
-    store.playList(personalRoamSongs.value, 0);
-    toast.success("私人漫游", `开始播放 ${personalRoamSongs.value.length} 首推荐歌曲`);
+    store.isPersonalRoam = true;
+    // 私人漫游只播放第一首
+    store.queue = [personalRoamSongs.value[0]];
+    store.currentIndex = 0;
+    store.isPlaying = true;
+    // 加载歌词和URL
+    const s = store.currentSong;
+    if (s && s.source === "netease" && s.neteaseId) {
+      store._ensureNeteaseUrl(s);
+      store._ensureNeteaseLyrics(s).then(() => {
+        if (store.currentSong?.id === s.id) store.loadLyrics(s);
+      });
+    }
+    toast.success("私人漫游", "开始播放推荐歌曲");
   }
 }
 

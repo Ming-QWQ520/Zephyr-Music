@@ -39,6 +39,8 @@ interface State {
   pendingPlaylistId: number | null;
   /** 当前播放队列来源的歌单 ID（用于听歌打卡 sourceid） */
   sourcePlaylistId: number | null;
+  /** 是否处于私人漫游模式（每日推荐歌曲，单首播放，不感兴趣换歌） */
+  isPersonalRoam: boolean;
   /** 视图历史栈，用于返回上一页 */
   viewHistory: ViewKey[];
   /** 当前歌单 ID 历史，用于返回上一歌单 */
@@ -57,6 +59,7 @@ export const usePlayerStore = defineStore("player", {
       previousView: null,
       pendingPlaylistId: null,
       sourcePlaylistId: null,
+      isPersonalRoam: false,
       viewHistory: [],
       playlistIdHistory: [],
     } as State;
@@ -95,6 +98,7 @@ export const usePlayerStore = defineStore("player", {
     /** 播放一首歌。如果是网易云歌曲（source=netease），动态获取 URL 和歌词。
      *  URL 和歌词并行获取，不等待歌词就开始播放（歌词后台加载，加载完自动显示）。 */
     async playNow(song: Song) {
+      this.isPersonalRoam = false; // 手动播放退出私人漫游模式
       // 网易云歌曲：并行获取 URL 和歌词（不阻塞播放）
       if (song.source === "netease" && song.neteaseId) {
         const urlPromise = !song.url ? this._ensureNeteaseUrl(song) : Promise.resolve();
@@ -117,6 +121,7 @@ export const usePlayerStore = defineStore("player", {
 
     /** 播放歌单。网易云歌曲需要逐个获取 URL（首次播放时懒加载）。 */
     async playList(songs: Song[], start = 0) {
+      this.isPersonalRoam = false; // 播放列表退出私人漫游模式
       this.queue = [...songs];
       this.currentIndex = Math.max(0, Math.min(start, songs.length - 1));
       this.isPlaying = true;

@@ -4,8 +4,12 @@ import { usePlayerStore } from "@/stores/player";
 import { useSettings } from "@/components/SettingsPanel.vue";
 import { formatTime } from "@/composables/utils";
 import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew, commentAction, type NewComment } from "@/api/netease";
+import { apiGet } from "@/api/netease/core";
+import { neteaseSongToSong } from "@/api/netease";
 import type { Song } from "@/types";
 import { log } from "@/composables/logger";
+import { useToast } from "@/composables/useToast";
+const toast = useToast();
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
 
@@ -229,6 +233,38 @@ function cyclePlayMode() {
   else if (next === "shuffle") store.shuffle = true;
 }
 
+// ===== 私人漫游不感兴趣 =====
+/** 是否显示不感兴趣按钮（仅私人漫游模式） */
+const showDislikeBtn = computed(() => store.isPersonalRoam && store.currentSong?.source === "netease" && !!store.currentSong?.neteaseId);
+
+/** 不感兴趣：标记当前歌曲并换下一首 */
+async function dislikeCurrentSong() {
+  const song = store.currentSong;
+  if (!song || !song.neteaseId) return;
+  try {
+    const res = await apiGet<{ code: number; data?: any }>("/recommend/songs/dislike", { id: song.neteaseId });
+    if (res.code === 200) {
+      if (res.data?.id) {
+        const newSong = neteaseSongToSong(res.data as any);
+        store.queue[store.currentIndex] = newSong;
+        store._ensureNeteaseUrl(newSong);
+        store._ensureNeteaseLyrics(newSong).then(() => {
+          if (store.currentSong?.id === newSong.id) store.loadLyrics(newSong);
+        });
+        toast.success("已换一首", newSong.name);
+      } else {
+        store.removeFromQueue(store.currentIndex);
+        toast.success("已标记不感兴趣", song.name);
+      }
+    } else {
+      toast.error("操作失败", "请稍后重试");
+    }
+  } catch (e) {
+    log.warn("player", "dislike failed", { error: String(e) });
+    toast.error("操作失败", "请稍后重试");
+  }
+}
+
 const progressFrac = computed(() => store.progress);
 function onSeek(f: number) { store.seekByFraction(f); }
 const progressText = computed(() => formatTime(store.currentTime));
@@ -425,6 +461,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
     <!-- Center: controls + progress -->
     <div class="center-block">
       <div class="controls">
+        <!-- 不感兴趣按钮（仅私人漫游模式，放在播放顺序按键左侧） -->
+        <button v-if="showDislikeBtn" class="ctrl-btn dislike-btn" title="不感兴趣，换一首" @click.stop="dislikeCurrentSong">
+          <img src="/icons/dislike.svg" alt="dislike" class="ctrl-icon" />
+        </button>
         <button class="ctrl-btn mode" :class="{ active: playMode !== 'sequence' }" :title="PLAY_MODE_LABEL[playMode]" @click.stop="cyclePlayMode">
           <Icon :name="PLAY_MODE_ICON[playMode]" :size="18" />
         </button>
@@ -579,6 +619,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctrl-btn:active { background: var(--bg-active); }
 .ctrl-btn.active { color: var(--accent); background: var(--accent-soft); }
 .ctrl-btn[disabled] { opacity: 0.38; cursor: not-allowed; pointer-events: none; }
+.ctrl-icon { width: 18px; height: 18px; pointer-events: none; }
+.dislike-btn:hover { color: #ff4d4f; }
 /* Play button - no background fill */
 .ctrl-btn.play { width: 44px; height: 44px; color: var(--text); margin: 0 4px; }
 .ctrl-btn.play:hover { color: #fff; transform: scale(1.05); }
