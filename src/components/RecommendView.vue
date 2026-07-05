@@ -18,10 +18,9 @@ const recommendPlaylists = ref<NeteasePlaylist[]>([]);
 const loading = ref(true);
 
 // 顶部入口卡片
-// 每日推荐 = /recommend/resource（推荐歌单，打开歌单详情）
-const dailyRecommendPl = ref<NeteasePlaylist | null>(null);
-const dailyRecommendCover = ref("");
-// 私人漫游 = /recommend/songs（每日推荐歌曲，播放歌曲 + 不感兴趣）
+// 每日推荐 = /recommend/songs（每日推荐歌曲，播放+不感兴趣）
+const dailyRecommendSongs = ref<Song[]>([]);
+// 私人漫游 = /recommend/resource（推荐资源/歌曲）
 const personalRoamSongs = ref<Song[]>([]);
 // 私人雷达 = 固定歌单 ID 3136952023
 const personalRadarCover = ref("");
@@ -37,25 +36,29 @@ const rankings = ref<{ id: number; name: string; coverImgUrl: string; songs: Son
 async function loadData() {
   loading.value = true;
   if (getCookie()) {
-    // 每日推荐歌单（/recommend/resource）—— 第一个推荐歌单作为"每日推荐"入口
-    try {
-      const res = await recommendResource();
-      recommendPlaylists.value = (res.recommend || res.data || []).slice(0, 10);
-      const first = recommendPlaylists.value[0];
-      if (first) {
-        dailyRecommendPl.value = first;
-        dailyRecommendCover.value = first.coverImgUrl || "";
-      }
-      log.info("recommend-view", "recommend playlists loaded", { count: recommendPlaylists.value.length });
-    } catch (e) { log.warn("recommend-view", "load recommend failed", { error: String(e) }); }
-
-    // 私人漫游歌曲（/recommend/songs）—— 每日推荐歌曲
+    // 每日推荐歌曲（/recommend/songs）
     try {
       const sres = await recommendSongs();
       const dailySongs = sres.data?.dailySongs || [];
-      personalRoamSongs.value = dailySongs.slice(0, 30).map(neteaseSongToSong);
-      log.info("recommend-view", "daily songs loaded", { count: personalRoamSongs.value.length });
+      dailyRecommendSongs.value = dailySongs.slice(0, 30).map(neteaseSongToSong);
+      log.info("recommend-view", "daily songs loaded", { count: dailyRecommendSongs.value.length });
     } catch (e) { log.warn("recommend-view", "load daily songs failed", { error: String(e) }); }
+
+    // 推荐资源（/recommend/resource）—— 返回推荐歌曲列表
+    try {
+      const res = await recommendResource();
+      const recList = res.recommend || res.data || [];
+      // /recommend/resource 返回的是歌曲数组
+      personalRoamSongs.value = recList.slice(0, 30).map((s: any) => neteaseSongToSong({
+        id: s.id,
+        name: s.name,
+        ar: s.artists || s.ar,
+        al: s.album || s.al,
+        dt: s.duration || s.dt,
+        picUrl: s.picUrl,
+      } as any));
+      log.info("recommend-view", "recommend resource loaded", { count: personalRoamSongs.value.length });
+    } catch (e) { log.warn("recommend-view", "load recommend resource failed", { error: String(e) }); }
   }
 
   // 私人雷达封面（固定歌单 ID 3136952023）
@@ -79,9 +82,13 @@ async function loadData() {
   }
 }
 
-/** 打开每日推荐歌单 */
-function openDailyRecommend() {
-  if (dailyRecommendPl.value) openPlaylist(dailyRecommendPl.value);
+/** 播放每日推荐歌曲 */
+function playDailyRecommend() {
+  if (dailyRecommendSongs.value.length > 0) {
+    store.setSourcePlaylistId(null);
+    store.playList(dailyRecommendSongs.value, 0);
+    toast.success("每日推荐", `开始播放 ${dailyRecommendSongs.value.length} 首推荐歌曲`);
+  }
 }
 
 /** 播放私人漫游歌曲 */
@@ -100,12 +107,12 @@ async function dislikeSong(song: Song) {
     const { apiGet } = await import("@/api/netease/core");
     const res = await apiGet<{ code: number; data?: any }>("/recommend/songs/dislike", { id: song.neteaseId });
     if (res.code === 200) {
-      // 从列表移除
-      personalRoamSongs.value = personalRoamSongs.value.filter(s => s.id !== song.id);
+      // 从每日推荐列表移除
+      dailyRecommendSongs.value = dailyRecommendSongs.value.filter(s => s.id !== song.id);
       // 如果返回新歌曲，添加到列表末尾
       if (res.data?.id) {
         const newSong = neteaseSongToSong(res.data as any);
-        personalRoamSongs.value.push(newSong);
+        dailyRecommendSongs.value.push(newSong);
       }
       toast.success("已标记不感兴趣", song.name);
     }
@@ -204,18 +211,16 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   <section class="recommend-view nice-scroll">
     <!-- 顶部入口卡片：每日推荐 / 私人漫游 / 私人雷达 -->
     <div class="entry-cards">
-      <!-- 每日推荐 = /recommend/resource 推荐歌单 -->
-      <button class="entry-card" @click="openDailyRecommend" :disabled="!dailyRecommendPl">
+      <!-- 每日推荐 = /recommend/songs 每日推荐歌曲 -->
+      <button class="entry-card" @click="playDailyRecommend" :disabled="!dailyRecommendSongs.length">
         <div class="entry-cover daily-cover">
-          <img v-if="dailyRecommendCover" :src="dailyRecommendCover + '?param=200x200'" alt="每日推荐" referrerpolicy="no-referrer" loading="lazy" />
-          <Icon v-else name="music" :size="28" />
           <div class="entry-date">{{ new Date().getDate() }}</div>
         </div>
         <div class="entry-name">每日推荐</div>
-        <div class="entry-sub">每日推荐歌单</div>
+        <div class="entry-sub">{{ dailyRecommendSongs.length }} 首推荐歌曲</div>
       </button>
 
-      <!-- 私人漫游 = /recommend/songs 每日推荐歌曲 -->
+      <!-- 私人漫游 = /recommend/resource 推荐歌曲 -->
       <button class="entry-card" @click="playPersonalRoam" :disabled="!personalRoamSongs.length">
         <div class="entry-cover roam-cover">
           <Icon name="shuffle" :size="28" />
@@ -235,16 +240,16 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       </button>
     </div>
 
-    <!-- 私人漫游歌曲列表（带不感兴趣按钮） -->
-    <div v-if="personalRoamSongs.length" class="section">
+    <!-- 每日推荐歌曲列表（带不感兴趣按钮） -->
+    <div v-if="dailyRecommendSongs.length" class="section">
       <div class="roam-header">
-        <h2 class="section-title">私人漫游</h2>
-        <button class="roam-play-all" @click="playPersonalRoam">
+        <h2 class="section-title">每日推荐</h2>
+        <button class="roam-play-all" @click="playDailyRecommend">
           <Icon name="play" :size="14" /><span>播放全部</span>
         </button>
       </div>
       <div class="roam-list">
-        <div v-for="(song, idx) in personalRoamSongs.slice(0, 10)" :key="song.id"
+        <div v-for="(song, idx) in dailyRecommendSongs.slice(0, 10)" :key="song.id"
           class="roam-item" :class="{ active: song.id === store.currentSong?.id }"
           @click="playSong(song)">
           <span class="roam-idx">{{ idx + 1 }}</span>
