@@ -263,24 +263,6 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ranking-song-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text); }
 .ranking-artist { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; max-width: 100px; }
 
-/* 有壁纸时卡片毛玻璃半透明，适应壁纸背景 */
-:global(body.has-wallpaper) .ranking-card {
-  background: rgba(33, 31, 38, 0.55);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  border-color: rgba(255, 255, 255, 0.10);
-  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-}
-:global(body.has-wallpaper) .ranking-song:hover {
-  background: rgba(255, 255, 255, 0.08);
-}
-:global(body.has-wallpaper) .ranking-song.active {
-  background: rgba(250, 35, 59, 0.18);
-}
-:global(body.has-wallpaper) .card-cover {
-  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
-}
-
 /* 右键菜单（与搜索界面样式一致） */
 .ctx-menu { position: fixed; z-index: 500; min-width: 180px; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 4px; }
 .ctx-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border-radius: 6px; font-size: 13px; color: var(--text); text-align: left; transition: background 0.1s; }
@@ -312,4 +294,24 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .pl-dialog-count { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
 .pl-dialog-fade-enter-active, .pl-dialog-fade-leave-active { transition: opacity 0.15s; }
 .pl-dialog-fade-enter-from, .pl-dialog-fade-leave-to { opacity: 0; }
+</style>
+
+<!-- 非 scoped 样式：有壁纸时卡片毛玻璃半透明（:global 在 scoped 中无法正确编译复合选择器） -->
+<style>
+body.has-wallpaper .ranking-card {
+  background: rgba(33, 31, 38, 0.55);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+body.has-wallpaper .ranking-song:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+body.has-wallpaper .ranking-song.active {
+  background: rgba(250, 35, 59, 0.18);
+}
+body.has-wallpaper .card-cover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+}
 </style>

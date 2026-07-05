@@ -596,3 +596,21 @@ onUnmounted(() => {
   .tb-left { width: auto; }
 }
 </style>
+
+<!-- 非 scoped 样式：有壁纸时用户按钮毛玻璃半透明 -->
+<style>
+body.has-wallpaper .ne-login-btn,
+body.has-wallpaper .ne-user-btn {
+  background: rgba(40, 38, 46, 0.55) !important;
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.25);
+}
+body.has-wallpaper .ne-user-btn:hover {
+  background: rgba(50, 48, 56, 0.65) !important;
+}
+body.has-wallpaper .ne-login-btn:hover {
+  background: rgba(50, 48, 56, 0.65) !important;
+}
+</style>
