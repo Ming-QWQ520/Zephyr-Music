@@ -18,9 +18,9 @@ const recommendPlaylists = ref<NeteasePlaylist[]>([]);
 const loading = ref(true);
 
 // 顶部入口卡片
-const dailyRecommendCover = ref(""); // 每日推荐歌单封面
-const dailyRecommendPl = ref<NeteasePlaylist | null>(null); // 每日推荐歌单
-const personalRoamSongs = ref<Song[]>([]); // 私人漫游歌曲
+const dailyRecommendSongs = ref<Song[]>([]); // 每日推荐歌曲（/recommend/songs）
+const personalRoamPl = ref<NeteasePlaylist | null>(null); // 私人漫游歌单（/recommend/resource 第一个）
+const personalRoamCover = ref(""); // 私人漫游封面
 const personalRadarCover = ref(""); // 私人雷达封面
 
 // 榜单精选
@@ -33,27 +33,26 @@ const rankings = ref<{ id: number; name: string; coverImgUrl: string; songs: Son
 
 async function loadData() {
   loading.value = true;
-  // 加载推荐歌单 + 每日推荐 + 私人漫游
   if (getCookie()) {
-    // 推荐歌单
+    // 推荐歌单（/recommend/resource）
     try {
       const res = await recommendResource();
       recommendPlaylists.value = (res.recommend || res.data || []).slice(0, 10);
-      // 第一个推荐歌单作为"每日推荐"入口封面
+      // 第一个推荐歌单作为"私人漫游"入口
       const first = recommendPlaylists.value[0];
       if (first) {
-        dailyRecommendPl.value = first;
-        dailyRecommendCover.value = first.coverImgUrl || "";
+        personalRoamPl.value = first;
+        personalRoamCover.value = first.coverImgUrl || "";
       }
       log.info("recommend-view", "recommend playlists loaded", { count: recommendPlaylists.value.length });
     } catch (e) { log.warn("recommend-view", "load recommend failed", { error: String(e) }); }
 
-    // 私人漫游（每日推荐歌曲）
+    // 每日推荐歌曲（/recommend/songs）
     try {
       const sres = await recommendSongs();
       const dailySongs = sres.data?.dailySongs || [];
-      personalRoamSongs.value = dailySongs.slice(0, 30).map(neteaseSongToSong);
-      log.info("recommend-view", "daily songs loaded", { count: personalRoamSongs.value.length });
+      dailyRecommendSongs.value = dailySongs.slice(0, 30).map(neteaseSongToSong);
+      log.info("recommend-view", "daily songs loaded", { count: dailyRecommendSongs.value.length });
     } catch (e) { log.warn("recommend-view", "load daily songs failed", { error: String(e) }); }
   }
 
@@ -78,17 +77,18 @@ async function loadData() {
   }
 }
 
-/** 打开每日推荐歌单 */
-function openDailyRecommend() {
-  if (dailyRecommendPl.value) openPlaylist(dailyRecommendPl.value);
+/** 播放每日推荐歌曲 */
+function playDailyRecommend() {
+  if (dailyRecommendSongs.value.length > 0) {
+    store.setSourcePlaylistId(null);
+    store.playList(dailyRecommendSongs.value, 0);
+    toast.success("每日推荐", `开始播放 ${dailyRecommendSongs.value.length} 首推荐歌曲`);
+  }
 }
 
-/** 播放私人漫游歌曲 */
-function playPersonalRoam() {
-  if (personalRoamSongs.value.length > 0) {
-    store.playList(personalRoamSongs.value, 0);
-    toast.success("私人漫游", `开始播放 ${personalRoamSongs.value.length} 首推荐歌曲`);
-  }
+/** 打开私人漫游歌单 */
+function openPersonalRoam() {
+  if (personalRoamPl.value) openPlaylist(personalRoamPl.value);
 }
 
 /** 打开私人雷达歌单 */
@@ -180,22 +180,21 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   <section class="recommend-view nice-scroll">
     <!-- 顶部入口卡片：每日推荐 / 私人漫游 / 私人雷达 -->
     <div class="entry-cards">
-      <button class="entry-card" @click="openDailyRecommend" :disabled="!dailyRecommendPl">
+      <button class="entry-card" @click="playDailyRecommend" :disabled="!dailyRecommendSongs.length">
         <div class="entry-cover daily-cover">
-          <img v-if="dailyRecommendCover" :src="dailyRecommendCover + '?param=200x200'" alt="每日推荐" referrerpolicy="no-referrer" loading="lazy" />
-          <Icon v-else name="music" :size="28" />
           <div class="entry-date">{{ new Date().getDate() }}</div>
         </div>
         <div class="entry-name">每日推荐</div>
-        <div class="entry-sub">每日推荐歌单</div>
+        <div class="entry-sub">{{ dailyRecommendSongs.length }} 首推荐歌曲</div>
       </button>
 
-      <button class="entry-card" @click="playPersonalRoam" :disabled="!personalRoamSongs.length">
+      <button class="entry-card" @click="openPersonalRoam" :disabled="!personalRoamPl">
         <div class="entry-cover roam-cover">
-          <Icon name="shuffle" :size="28" />
+          <img v-if="personalRoamCover" :src="personalRoamCover + '?param=200x200'" alt="私人漫游" referrerpolicy="no-referrer" loading="lazy" />
+          <Icon v-else name="music" :size="28" />
         </div>
         <div class="entry-name">私人漫游</div>
-        <div class="entry-sub">{{ personalRoamSongs.length }} 首推荐歌曲</div>
+        <div class="entry-sub">推荐歌单</div>
       </button>
 
       <button class="entry-card" @click="openPersonalRadar">

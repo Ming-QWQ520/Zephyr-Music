@@ -5,7 +5,7 @@ import {
   isLocalFile, rodioPlay, rodioPause, rodioResume, rodioStop,
   rodioSetVolume,
 } from "@/composables/rodioBridge";
-import { scrobble } from "@/api/netease";
+import { scrobble, scrobbleV1 } from "@/api/netease";
 
 export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   const store = usePlayerStore();
@@ -16,24 +16,42 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   let songLoading = false;
 
   // ===== 听歌打卡 =====
-  // 每次切换歌曲时调用 /scrobble 接口，传入 id、sourceid、time
-  let lastScrobbledSongId: number | null = null;
+  // 1. 第一秒打卡：歌曲开始播放时调用非加密 /scrobble（time=1）
+  // 2. 切换歌曲打卡：切换到新歌时，对上一首歌调用加密 /scrobble/v1（传入总播放时长）
+  let lastScrobbledSongId: number | null = null; // 已打卡非加密版本的歌曲 ID
+  let prevSongInfo: { neteaseId: number; name: string; artist: string; duration: number; sourceid: number | null } | null = null;
 
-  function doScrobble(song: { neteaseId?: number; name?: string; artist?: string; duration?: number } | null) {
+  /** 第一秒打卡：非加密 /scrobble */
+  function doScrobbleStart(song: { neteaseId?: number; name?: string; artist?: string; duration?: number } | null) {
     if (!song || !song.neteaseId) return;
-    // 同一首歌不重复打卡（防止 currentIndex 变化但歌曲未变时重复调用）
     if (lastScrobbledSongId === song.neteaseId) return;
     lastScrobbledSongId = song.neteaseId;
     const sourceid = store.sourcePlaylistId;
     if (!sourceid) {
-      log.info(TAG, "scrobble skipped (no sourcePlaylistId)", { songId: song.neteaseId });
+      log.info(TAG, "scrobble start skipped (no sourcePlaylistId)", { songId: song.neteaseId });
       return;
     }
-    const playTime = Math.floor(store.currentTime || 0);
-    scrobble(song.neteaseId, sourceid, playTime).then(() => {
-      log.info(TAG, "scrobble ok", { songId: song.neteaseId, sourceid, time: playTime });
+    // 第一秒打卡，time=1
+    scrobble(song.neteaseId, sourceid, 1).then(() => {
+      log.info(TAG, "scrobble start ok", { songId: song.neteaseId, sourceid, time: 1 });
     }).catch((e) => {
-      log.warn(TAG, "scrobble failed", { error: String(e) });
+      log.warn(TAG, "scrobble start failed", { error: String(e) });
+    });
+  }
+
+  /** 切换歌曲打卡：对上一首歌调用加密 /scrobble/v1，传入总播放时长 */
+  function doScrobbleEnd(prev: { neteaseId: number; name: string; artist: string; duration: number; sourceid: number | null } | null) {
+    if (!prev) return;
+    const totalTime = Math.floor(store.duration || prev.duration || 0);
+    scrobbleV1(prev.neteaseId, totalTime, {
+      sourceid: prev.sourceid || undefined,
+      song: prev.name,
+      artist: prev.artist,
+      total: prev.duration,
+    }).then(() => {
+      log.info(TAG, "scrobble v1 ok", { songId: prev.neteaseId, totalTime, song: prev.name });
+    }).catch((e) => {
+      log.warn(TAG, "scrobble v1 failed", { error: String(e) });
     });
   }
 
@@ -48,13 +66,30 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
         const w = mod.getCurrentWindow?.() ?? (mod as any).window?.();
         if (w) await w.setTitle(title);
       } catch { /* ignore if not in Tauri */ }
-      // 切换歌曲时打卡（网易云歌曲）
+
+      // 切换歌曲时：对上一首网易云歌曲调用加密版 /scrobble/v1（传入总播放时长）
+      if (oldSong && oldSong.source === "netease" && oldSong.neteaseId) {
+        if (!song || song.neteaseId !== oldSong.neteaseId) {
+          doScrobbleEnd(prevSongInfo);
+        }
+      }
+
+      // 新歌开始：第一秒打卡非加密版 /scrobble
       if (song && song.source === "netease" && song.neteaseId) {
         if (!oldSong || oldSong.neteaseId !== song.neteaseId) {
-          doScrobble(song);
+          // 保存当前歌曲信息供切换时使用
+          prevSongInfo = {
+            neteaseId: song.neteaseId,
+            name: song.name,
+            artist: song.artist,
+            duration: song.duration || 0,
+            sourceid: store.sourcePlaylistId,
+          };
+          doScrobbleStart(song);
         }
       } else {
         lastScrobbledSongId = null;
+        prevSongInfo = null;
       }
     },
     { immediate: true }

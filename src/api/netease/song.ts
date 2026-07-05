@@ -43,13 +43,48 @@ export async function songDetail(ids: number[]): Promise<{
   return r;
 }
 
-/** 听歌打卡（/scrobble） */
+/** 听歌打卡（/scrobble，非加密版）
+ *  id: 歌曲 ID，sourceid: 歌单或专辑 ID，time: 播放时长（秒）
+ */
 export async function scrobble(id: number, sourceid: number, time?: number): Promise<{ code: number }> {
   const params: Record<string, string | number> = { id, sourceid };
   if (time !== undefined && time >= 0) params.time = time;
   log.info(TAG, "scrobble()", { id, sourceid, time });
   const r = await apiGet("/scrobble", params);
   log.info(TAG, "scrobble result", { id, sourceid, code: r.code });
+  return r;
+}
+
+/** 听歌打卡 V2（/scrobble/v1，NCBL 加密版）
+ *  id: 歌曲 ID，time: 播放时长（秒）
+ *  sourceid: 来源列表 ID，sourceName: 来源名称（默认 list）
+ *  song: 歌曲名，artist: 艺术家，bitrate: 码率（默认 320），level: 音质（默认 exhigh）
+ *  total: 歌曲总时长（秒）
+ */
+export async function scrobbleV1(
+  id: number,
+  time: number,
+  options?: {
+    sourceid?: number;
+    sourceName?: string;
+    song?: string;
+    artist?: string;
+    bitrate?: number;
+    level?: string;
+    total?: number;
+  }
+): Promise<{ code: number }> {
+  const params: Record<string, string | number> = { id, time };
+  if (options?.sourceid) params.sourceid = options.sourceid;
+  if (options?.sourceName) params.sourceName = options.sourceName;
+  if (options?.song) params.song = options.song;
+  if (options?.artist) params.artist = options.artist;
+  if (options?.bitrate) params.bitrate = options.bitrate;
+  if (options?.level) params.level = options.level;
+  if (options?.total) params.total = options.total;
+  log.info(TAG, "scrobbleV1()", { id, time, ...options });
+  const r = await apiGet<{ code: number }>("/scrobble/v1", params);
+  log.info(TAG, "scrobbleV1 result", { id, time, code: r.code });
   return r;
 }
 
