@@ -1,6 +1,8 @@
 /**
  * 网易云用户信息（VIP / 等级 / 听歌时长）
  * 从 App.vue 提取，负责登录后加载用户附加信息。
+ *
+ * refs 为模块级单例，确保 useNeteaseAuth 和 App.vue 读取同一份数据。
  */
 import { ref } from "vue";
 import { log } from "@/composables/logger";
@@ -16,63 +18,64 @@ export function formatListenTime(seconds: number): string {
   return `${m}分钟`;
 }
 
+// 模块级单例 refs —— 所有 useNeteaseUser() 调用共享同一份数据
+const neVipInfo = ref<VipInfo | null>(null);
+const neListenTotal = ref<string>("");
+const neUserLevel = ref<UserLevelInfo | null>(null);
+
+/** 加载 VIP 信息、总听歌时长和用户等级 */
+async function loadVipAndListenData() {
+  const user = _cachedUser.value;
+  if (!user) return;
+  const [vipRes, listenRes, levelRes] = await Promise.allSettled([
+    vipInfo(user.userId),
+    listenDataTotal(),
+    userLevel(),
+  ]);
+  try {
+    if (vipRes.status === "fulfilled") {
+      const d = vipRes.value.data || vipRes.value as any;
+      if (d) {
+        const isVip = d.isVip ?? (d.associator?.vipLevel ?? 0) > 0;
+        const level = d.redVipLevel || 0;
+        const expire = d.associator?.expireTime || d.musicPackage?.expireTime;
+        const expireText = expire ? new Date(expire).toLocaleDateString("zh-CN") : "";
+        neVipInfo.value = { isVip, redVipLevel: level, expireText };
+        log.info("app", "VIP info loaded", { isVip, level, expireText });
+      }
+    }
+  } catch (e) { log.warn("app", "load vip failed", { error: String(e) }); }
+  if (listenRes.status === "fulfilled") {
+    const time = listenRes.value.data?.totalDuration || listenRes.value.totalDuration || listenRes.value.data?.time || listenRes.value.time || 0;
+    neListenTotal.value = formatListenTime(time);
+    log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
+  }
+  if (levelRes.status === "fulfilled") {
+    const d = levelRes.value.data || levelRes.value as any;
+    if (d && d.level != null) {
+      const progress = Math.round((d.progress || 0) * 100);
+      neUserLevel.value = {
+        level: d.level,
+        nowLoginCount: d.nowLoginCount || 0,
+        nextLoginCount: d.nextLoginCount || 0,
+        nowPlayCount: d.nowPlayCount || 0,
+        nextPlayCount: d.nextPlayCount || 0,
+        progress,
+        needLogin: Math.max(0, (d.nextLoginCount || 0) - (d.nowLoginCount || 0)),
+        needPlay: Math.max(0, (d.nextPlayCount || 0) - (d.nowPlayCount || 0)),
+      };
+      log.info("app", "user level loaded", { level: d.level, progress, needLogin: neUserLevel.value.needLogin, needPlay: neUserLevel.value.needPlay });
+    }
+  }
+}
+
+/** 退出登录时清空 */
+function clearUserInfo() {
+  neVipInfo.value = null;
+  neListenTotal.value = "";
+  neUserLevel.value = null;
+}
+
 export function useNeteaseUser() {
-  const neVipInfo = ref<VipInfo | null>(null);
-  const neListenTotal = ref<string>("");
-  const neUserLevel = ref<UserLevelInfo | null>(null);
-
-  /** 加载 VIP 信息、总听歌时长和用户等级 */
-  async function loadVipAndListenData() {
-    const user = _cachedUser.value;
-    if (!user) return;
-    const [vipRes, listenRes, levelRes] = await Promise.allSettled([
-      vipInfo(user.userId),
-      listenDataTotal(),
-      userLevel(),
-    ]);
-    try {
-      if (vipRes.status === "fulfilled") {
-        const d = vipRes.value.data || vipRes.value as any;
-        if (d) {
-          const isVip = d.isVip ?? (d.associator?.vipLevel ?? 0) > 0;
-          const level = d.redVipLevel || 0;
-          const expire = d.associator?.expireTime || d.musicPackage?.expireTime;
-          const expireText = expire ? new Date(expire).toLocaleDateString("zh-CN") : "";
-          neVipInfo.value = { isVip, redVipLevel: level, expireText };
-          log.info("app", "VIP info loaded", { isVip, level, expireText });
-        }
-      }
-    } catch (e) { log.warn("app", "load vip failed", { error: String(e) }); }
-    if (listenRes.status === "fulfilled") {
-      const time = listenRes.value.data?.totalDuration || listenRes.value.totalDuration || listenRes.value.data?.time || listenRes.value.time || 0;
-      neListenTotal.value = formatListenTime(time);
-      log.info("app", "listen total loaded", { time, formatted: neListenTotal.value });
-    }
-    if (levelRes.status === "fulfilled") {
-      const d = levelRes.value.data || levelRes.value as any;
-      if (d && d.level != null) {
-        const progress = Math.round((d.progress || 0) * 100);
-        neUserLevel.value = {
-          level: d.level,
-          nowLoginCount: d.nowLoginCount || 0,
-          nextLoginCount: d.nextLoginCount || 0,
-          nowPlayCount: d.nowPlayCount || 0,
-          nextPlayCount: d.nextPlayCount || 0,
-          progress,
-          needLogin: Math.max(0, (d.nextLoginCount || 0) - (d.nowLoginCount || 0)),
-          needPlay: Math.max(0, (d.nextPlayCount || 0) - (d.nowPlayCount || 0)),
-        };
-        log.info("app", "user level loaded", { level: d.level, progress, needLogin: neUserLevel.value.needLogin, needPlay: neUserLevel.value.needPlay });
-      }
-    }
-  }
-
-  /** 退出登录时清空 */
-  function clearUserInfo() {
-    neVipInfo.value = null;
-    neListenTotal.value = "";
-    neUserLevel.value = null;
-  }
-
   return { neVipInfo, neListenTotal, neUserLevel, loadVipAndListenData, clearUserInfo };
 }

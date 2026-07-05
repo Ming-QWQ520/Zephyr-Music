@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { useAudioBinding } from "@/composables/useAudioBinding";
 import { log } from "@/composables/logger";
@@ -54,6 +54,12 @@ const showNowPlaying = computed(() => store.currentView === "nowplaying");
 const hasWallpaper = computed(() =>
   homeSettings.bgType === "image" && !!homeSettings.bgImage && !showNowPlaying.value
 );
+/** 同步壁纸状态到 body，让子组件（RecommendView 等）能检测并应用毛玻璃样式 */
+watch(hasWallpaper, (v) => {
+  if (typeof document !== "undefined") {
+    document.body.classList.toggle("has-wallpaper", v);
+  }
+}, { immediate: true });
 /** 壁纸加载失败处理 */
 function onWallpaperError() {
   log.warn("app", "wallpaper image load failed", { bgImage: homeSettings.bgImage?.substring(0, 80) });
