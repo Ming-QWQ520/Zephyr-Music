@@ -18,10 +18,13 @@ const recommendPlaylists = ref<NeteasePlaylist[]>([]);
 const loading = ref(true);
 
 // 顶部入口卡片
-const dailyRecommendSongs = ref<Song[]>([]); // 每日推荐歌曲（/recommend/songs）
-const personalRoamPl = ref<NeteasePlaylist | null>(null); // 私人漫游歌单（/recommend/resource 第一个）
-const personalRoamCover = ref(""); // 私人漫游封面
-const personalRadarCover = ref(""); // 私人雷达封面
+// 每日推荐 = /recommend/resource（推荐歌单，打开歌单详情）
+const dailyRecommendPl = ref<NeteasePlaylist | null>(null);
+const dailyRecommendCover = ref("");
+// 私人漫游 = /recommend/songs（每日推荐歌曲，播放歌曲 + 不感兴趣）
+const personalRoamSongs = ref<Song[]>([]);
+// 私人雷达 = 固定歌单 ID 3136952023
+const personalRadarCover = ref("");
 
 // 榜单精选
 const rankings = ref<{ id: number; name: string; coverImgUrl: string; songs: Song[]; loading: boolean }[]>([
@@ -34,25 +37,24 @@ const rankings = ref<{ id: number; name: string; coverImgUrl: string; songs: Son
 async function loadData() {
   loading.value = true;
   if (getCookie()) {
-    // 推荐歌单（/recommend/resource）
+    // 每日推荐歌单（/recommend/resource）—— 第一个推荐歌单作为"每日推荐"入口
     try {
       const res = await recommendResource();
       recommendPlaylists.value = (res.recommend || res.data || []).slice(0, 10);
-      // 第一个推荐歌单作为"私人漫游"入口
       const first = recommendPlaylists.value[0];
       if (first) {
-        personalRoamPl.value = first;
-        personalRoamCover.value = first.coverImgUrl || "";
+        dailyRecommendPl.value = first;
+        dailyRecommendCover.value = first.coverImgUrl || "";
       }
       log.info("recommend-view", "recommend playlists loaded", { count: recommendPlaylists.value.length });
     } catch (e) { log.warn("recommend-view", "load recommend failed", { error: String(e) }); }
 
-    // 每日推荐歌曲（/recommend/songs）
+    // 私人漫游歌曲（/recommend/songs）—— 每日推荐歌曲
     try {
       const sres = await recommendSongs();
       const dailySongs = sres.data?.dailySongs || [];
-      dailyRecommendSongs.value = dailySongs.slice(0, 30).map(neteaseSongToSong);
-      log.info("recommend-view", "daily songs loaded", { count: dailyRecommendSongs.value.length });
+      personalRoamSongs.value = dailySongs.slice(0, 30).map(neteaseSongToSong);
+      log.info("recommend-view", "daily songs loaded", { count: personalRoamSongs.value.length });
     } catch (e) { log.warn("recommend-view", "load daily songs failed", { error: String(e) }); }
   }
 
@@ -77,18 +79,40 @@ async function loadData() {
   }
 }
 
-/** 播放每日推荐歌曲 */
-function playDailyRecommend() {
-  if (dailyRecommendSongs.value.length > 0) {
+/** 打开每日推荐歌单 */
+function openDailyRecommend() {
+  if (dailyRecommendPl.value) openPlaylist(dailyRecommendPl.value);
+}
+
+/** 播放私人漫游歌曲 */
+function playPersonalRoam() {
+  if (personalRoamSongs.value.length > 0) {
     store.setSourcePlaylistId(null);
-    store.playList(dailyRecommendSongs.value, 0);
-    toast.success("每日推荐", `开始播放 ${dailyRecommendSongs.value.length} 首推荐歌曲`);
+    store.playList(personalRoamSongs.value, 0);
+    toast.success("私人漫游", `开始播放 ${personalRoamSongs.value.length} 首推荐歌曲`);
   }
 }
 
-/** 打开私人漫游歌单 */
-function openPersonalRoam() {
-  if (personalRoamPl.value) openPlaylist(personalRoamPl.value);
+/** 不感兴趣（/recommend/songs/dislike） */
+async function dislikeSong(song: Song) {
+  if (!song.neteaseId) return;
+  try {
+    const { apiGet } = await import("@/api/netease/core");
+    const res = await apiGet<{ code: number; data?: any }>("/recommend/songs/dislike", { id: song.neteaseId });
+    if (res.code === 200) {
+      // 从列表移除
+      personalRoamSongs.value = personalRoamSongs.value.filter(s => s.id !== song.id);
+      // 如果返回新歌曲，添加到列表末尾
+      if (res.data?.id) {
+        const newSong = neteaseSongToSong(res.data as any);
+        personalRoamSongs.value.push(newSong);
+      }
+      toast.success("已标记不感兴趣", song.name);
+    }
+  } catch (e) {
+    log.warn("recommend-view", "dislike failed", { error: String(e) });
+    toast.error("操作失败", "请稍后重试");
+  }
 }
 
 /** 打开私人雷达歌单 */
@@ -180,23 +204,27 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   <section class="recommend-view nice-scroll">
     <!-- 顶部入口卡片：每日推荐 / 私人漫游 / 私人雷达 -->
     <div class="entry-cards">
-      <button class="entry-card" @click="playDailyRecommend" :disabled="!dailyRecommendSongs.length">
+      <!-- 每日推荐 = /recommend/resource 推荐歌单 -->
+      <button class="entry-card" @click="openDailyRecommend" :disabled="!dailyRecommendPl">
         <div class="entry-cover daily-cover">
+          <img v-if="dailyRecommendCover" :src="dailyRecommendCover + '?param=200x200'" alt="每日推荐" referrerpolicy="no-referrer" loading="lazy" />
+          <Icon v-else name="music" :size="28" />
           <div class="entry-date">{{ new Date().getDate() }}</div>
         </div>
         <div class="entry-name">每日推荐</div>
-        <div class="entry-sub">{{ dailyRecommendSongs.length }} 首推荐歌曲</div>
+        <div class="entry-sub">每日推荐歌单</div>
       </button>
 
-      <button class="entry-card" @click="openPersonalRoam" :disabled="!personalRoamPl">
+      <!-- 私人漫游 = /recommend/songs 每日推荐歌曲 -->
+      <button class="entry-card" @click="playPersonalRoam" :disabled="!personalRoamSongs.length">
         <div class="entry-cover roam-cover">
-          <img v-if="personalRoamCover" :src="personalRoamCover + '?param=200x200'" alt="私人漫游" referrerpolicy="no-referrer" loading="lazy" />
-          <Icon v-else name="music" :size="28" />
+          <Icon name="shuffle" :size="28" />
         </div>
         <div class="entry-name">私人漫游</div>
-        <div class="entry-sub">推荐歌单</div>
+        <div class="entry-sub">{{ personalRoamSongs.length }} 首推荐歌曲</div>
       </button>
 
+      <!-- 私人雷达 = 固定歌单 ID 3136952023 -->
       <button class="entry-card" @click="openPersonalRadar">
         <div class="entry-cover radar-cover">
           <img v-if="personalRadarCover" :src="personalRadarCover + '?param=200x200'" alt="私人雷达" referrerpolicy="no-referrer" loading="lazy" />
@@ -205,6 +233,31 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         <div class="entry-name">私人雷达</div>
         <div class="entry-sub">为你打造的歌单</div>
       </button>
+    </div>
+
+    <!-- 私人漫游歌曲列表（带不感兴趣按钮） -->
+    <div v-if="personalRoamSongs.length" class="section">
+      <div class="roam-header">
+        <h2 class="section-title">私人漫游</h2>
+        <button class="roam-play-all" @click="playPersonalRoam">
+          <Icon name="play" :size="14" /><span>播放全部</span>
+        </button>
+      </div>
+      <div class="roam-list">
+        <div v-for="(song, idx) in personalRoamSongs.slice(0, 10)" :key="song.id"
+          class="roam-item" :class="{ active: song.id === store.currentSong?.id }"
+          @click="playSong(song)">
+          <span class="roam-idx">{{ idx + 1 }}</span>
+          <div class="roam-cover-sm" v-if="song.pic"><img :src="song.pic" alt="" referrerpolicy="no-referrer" /></div>
+          <div class="roam-meta">
+            <div class="roam-name truncate">{{ song.name }}</div>
+            <div class="roam-artist truncate">{{ song.artist }}</div>
+          </div>
+          <button class="roam-dislike" title="不感兴趣" @click.stop="dislikeSong(song)">
+            <img src="/icons/dislike.svg" alt="dislike" class="roam-dislike-icon" />
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 推荐歌单 -->
@@ -333,6 +386,26 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 }
 .entry-name { font-size: 14px; color: var(--text); font-weight: 600; }
 .entry-sub { font-size: 11px; color: var(--text-tertiary); }
+
+/* 私人漫游歌曲列表 */
+.roam-header { display: flex; align-items: center; justify-content: space-between; }
+.roam-play-all { display: flex; align-items: center; gap: 6px; padding: 6px 16px; border-radius: 16px; background: var(--accent); color: #fff; font-size: 12px; font-weight: 500; transition: all 0.15s; }
+.roam-play-all:hover { transform: scale(1.05); }
+.roam-list { display: flex; flex-direction: column; gap: 2px; }
+.roam-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius-sm); cursor: pointer; transition: background 0.15s; }
+.roam-item:hover { background: var(--bg-hover); }
+.roam-item.active { color: var(--accent); background: var(--accent-soft); }
+.roam-idx { width: 24px; text-align: center; font-size: 13px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.roam-item.active .roam-idx { color: var(--accent); }
+.roam-cover-sm { width: 36px; height: 36px; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
+.roam-cover-sm img { width: 100%; height: 100%; object-fit: cover; }
+.roam-meta { flex: 1; min-width: 0; }
+.roam-name { font-size: 13px; color: var(--text); }
+.roam-artist { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
+.roam-dislike { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s, background 0.15s; flex-shrink: 0; }
+.roam-item:hover .roam-dislike { opacity: 0.6; }
+.roam-dislike:hover { opacity: 1 !important; background: var(--bg-hover); }
+.roam-dislike-icon { width: 16px; height: 16px; pointer-events: none; }
 .loading-state { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 13px; padding: 24px; }
 .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-sm { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 12px auto; }
