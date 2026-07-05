@@ -159,9 +159,15 @@ async function sendComment() {
       replyTo.value = null;
       // 重新加载评论
       await loadComments(true);
+    } else {
+      // 显示错误提示
+      const errMsg = res.code === 301 ? "需要登录" : res.code === 302 ? "需要登录" : `发送失败 (${res.code})`;
+      log.warn("player", "send comment failed", { code: res.code });
+      alert(errMsg);
     }
   } catch (e) {
     log.warn("player", "send comment failed", { error: String(e) });
+    alert("发送评论失败: " + String(e));
   }
   sendingComment.value = false;
 }

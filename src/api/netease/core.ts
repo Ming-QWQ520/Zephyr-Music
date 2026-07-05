@@ -92,6 +92,57 @@ export async function apiGet<T = any>(path: string, params: Record<string, strin
   return json as T;
 }
 
+/**
+ * POST 请求（用于发送/删除评论等写操作）。
+ * 参数放在请求体（form-urlencoded），cookie/timestamp 自动拼接。
+ */
+export async function apiPost<T = any>(path: string, params: Record<string, string | number | boolean> = {}): Promise<T> {
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) body.set(k, String(v));
+  const cookie = getCookie();
+  if (cookie) body.set("cookie", cookie);
+  body.set("timestamp", String(Date.now()));
+  body.set("randomCNIP", "true");
+  const url = `${API_BASE}${path}`;
+  const hasCookie = !!cookie;
+  log.info(TAG, `→ POST ${path}`, { params, hasCookie });
+  const t0 = Date.now();
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString(),
+    });
+  } catch (e) {
+    log.error(TAG, `✗ ${path} fetch failed`, { error: String(e) });
+    throw e;
+  }
+  const ms = Date.now() - t0;
+  if (!res.ok) {
+    log.error(TAG, `✗ ${path} HTTP ${res.status}`, { ms });
+    throw new Error(`API ${path} HTTP ${res.status}`);
+  }
+  const json = await res.json();
+  if (json && typeof json === "object" && !Array.isArray(json) &&
+      "data" in json && json.data !== null && typeof json.data === "object" && !Array.isArray(json.data)) {
+    if (json.cookie && !(json.data as any).cookie) (json.data as any).cookie = json.cookie;
+    log.info(TAG, `← ${path} ${ms}ms (unwrapped data)`, {
+      code: json.code,
+      topLevelKeys: Object.keys(json),
+      dataKeys: Object.keys(json.data || {}),
+      preview: truncateForLog(json.data, 400),
+    });
+    return json.data as T;
+  }
+  log.info(TAG, `← ${path} ${ms}ms (no unwrap)`, {
+    code: json?.code,
+    keys: json && typeof json === "object" ? Object.keys(json) : typeof json,
+    preview: truncateForLog(json, 400),
+  });
+  return json as T;
+}
+
 // ===== 共享缓存状态（避免重复请求导致风控）=====
 
 /** 缓存的用户信息 */

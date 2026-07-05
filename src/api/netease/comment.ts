@@ -1,6 +1,6 @@
 /** 网易云评论 / 收藏者 API */
 import { log } from "@/composables/logger";
-import { apiGet, TAG } from "./core";
+import { apiGet, apiPost, TAG } from "./core";
 import type { PlaylistComment, PlaylistSubscriber } from "@/types";
 
 /** 歌单评论（/comment/playlist，旧版） */
@@ -88,7 +88,8 @@ export async function commentAction(
   if (content) params.content = content;
   if (commentId !== undefined) params.commentId = commentId;
   log.info(TAG, "commentAction()", { t, type, id, hasContent: !!content, commentId });
-  const r = await apiGet("/comment", params);
+  // 发送/回复/删除评论使用 POST 请求
+  const r = await apiPost<{ code: number; commentId?: number }>("/comment", params);
   log.info(TAG, "commentAction result", { code: r.code, commentId: r.commentId });
   return r;
 }
