@@ -161,8 +161,12 @@ async function sendComment() {
       await loadComments(true);
     } else {
       // 显示错误提示
-      const errMsg = res.code === 301 ? "需要登录" : res.code === 302 ? "需要登录" : `发送失败 (${res.code})`;
-      log.warn("player", "send comment failed", { code: res.code });
+      let errMsg = `发送失败 (${res.code})`;
+      if (res.code === 301 || res.code === 302) errMsg = "需要登录";
+      else if (res.code === 250) errMsg = "风控限制：网易云要求切换至移动端，当前 API 服务端不支持，请在网易云 App 中评论";
+      else if (res.msg) errMsg = res.msg;
+      else if (res.message) errMsg = res.message;
+      log.warn("player", "send comment failed", { code: res.code, msg: res.msg, message: res.message });
       alert(errMsg);
     }
   } catch (e) {

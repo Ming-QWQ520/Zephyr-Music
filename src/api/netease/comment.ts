@@ -76,6 +76,8 @@ export async function playlistSubscribers(id: number, limit = 20, offset = 0): P
  *  id: 资源 ID
  *  content: 发送/回复的内容（删除时不需要）
  *  commentId: 回复评论的 ID（回复时必填）或删除评论的 ID（删除时必填）
+ *  注：网易云对评论接口有风控，code=250 表示需要切换到移动端
+ *      通过添加 os=android 参数模拟移动端请求绕过风控
  */
 export async function commentAction(
   t: 0 | 1 | 2,
@@ -83,13 +85,15 @@ export async function commentAction(
   id: number,
   content?: string,
   commentId?: number
-): Promise<{ code: number; commentId?: number }> {
+): Promise<{ code: number; commentId?: number; msg?: string; message?: string }> {
   const params: Record<string, string | number> = { t, type, id };
   if (content) params.content = content;
   if (commentId !== undefined) params.commentId = commentId;
+  // 添加 os=android 模拟移动端，绕过"请切换至移动端"风控
+  params.os = "android";
   log.info(TAG, "commentAction()", { t, type, id, hasContent: !!content, commentId });
   // 发送/回复/删除评论使用 POST 请求
-  const r = await apiPost<{ code: number; commentId?: number }>("/comment", params);
-  log.info(TAG, "commentAction result", { code: r.code, commentId: r.commentId });
+  const r = await apiPost<{ code: number; commentId?: number; msg?: string; message?: string; dialog?: { title?: string; subtitle?: string } }>("/comment", params);
+  log.info(TAG, "commentAction result", { code: r.code, commentId: r.commentId, msg: r.msg, dialog: r.dialog?.subtitle });
   return r;
 }
