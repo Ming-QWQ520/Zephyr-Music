@@ -127,7 +127,7 @@ function useUrlWallpaper() {
             <!-- 壁纸预览 + 操作 -->
             <div v-if="settings.bgType === 'image'" class="wallpaper-block">
               <div class="wallpaper-preview">
-                <img v-if="settings.bgImage" :src="settings.bgImage" :style="{ objectFit: settings.bgFit, filter: `blur(${settings.bgBlur}px) brightness(${1 - settings.bgDim / 100})` }" @error="(e: any) => e.target.style.display='none'" />
+                <img v-if="settings.bgImage" :src="settings.bgImage" :style="{ objectFit: settings.bgFit, filter: `blur(${settings.bgBlur}px) brightness(${1 - settings.bgDim / 100 * 0.7})` }" @error="(e: any) => e.target.style.display='none'" />
                 <div v-if="!settings.bgImage" class="wallpaper-empty">
                   <Icon name="image" :size="32" />
                   <span>未设置壁纸</span>

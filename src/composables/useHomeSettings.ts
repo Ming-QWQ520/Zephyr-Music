@@ -39,7 +39,7 @@ export const DEFAULT_HOME_SETTINGS: HomeSettings = {
   bgType: "none",
   bgImage: "",
   bgBlur: 0,
-  bgDim: 40,
+  bgDim: 0,
   bgFit: "cover",
   accentColor: "#fa233b",
   fontScale: 1,
