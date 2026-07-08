@@ -83,9 +83,10 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     }
   }
 
-  /** 上报打卡：双上报（EAPI scrobble + NCBL scrobble_v1）
+  /** 上报打卡：双上报（EAPI scrobble + NCBL scrobble_v1）+ api-enhanced /scrobble
    *  EAPI: startplay + play → 计入听歌量/最近播放/听歌排行
-   *  NCBL: PLV + PLD → 计入云村听歌足迹/收听时长/年度报告 */
+   *  NCBL: PLV + PLD → 计入云村听歌足迹/收听时长/年度报告
+   *  api-enhanced /scrobble → 最近播放列表同步 */
   function doScrobble(info: ScrobbleInfo | null, isAutoNext: boolean = false) {
     if (!info) return;
     // 停止计时
@@ -104,7 +105,6 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     try {
       const { settings } = useSettings();
       level = (settings as any).audioLevel || "exhigh";
-      // 根据音质映射码率
       const bitrateMap: Record<string, number> = {
         standard: 128, higher: 192, exhigh: 320, lossless: 999,
         hires: 1999, jyeffect: 999, sky: 999, dolby: 1999, jymaster: 1999,
@@ -112,7 +112,17 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       bitrate = bitrateMap[level] || 320;
     } catch { /* ignore */ }
 
-    // 调用双上报（EAPI + NCBL）
+    log.info(TAG, "doScrobble 开始", { songId: info.neteaseId, name: info.name, playTime, reportTime, isAutoNext, accumulatedTime: info.accumulatedTime, sourceid: info.sourceid });
+
+    // 1. 调用 api-enhanced /scrobble（最近播放列表同步）
+    const sourceid = info.sourceid || 0;
+    scrobble(info.neteaseId, sourceid, reportTime).then(() => {
+      log.info(TAG, "scrobble (api-enhanced) ok", { songId: info.neteaseId, name: info.name, time: reportTime });
+    }).catch((e) => {
+      log.warn(TAG, "scrobble (api-enhanced) failed", { error: String(e) });
+    });
+
+    // 2. 调用双上报（EAPI + NCBL）
     dualScrobble({
       songId: info.neteaseId,
       songName: info.name,
