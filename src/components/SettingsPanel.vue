@@ -80,7 +80,7 @@ const STORAGE_KEY = "rnp-settings";
 
 export const DEFAULT_SETTINGS: PlayerSettings = {
   displayMode: "both",
-  colorMode: "dark",
+  colorMode: "light",
   accentColor: "#fa233b",
   textShadow: true,
   textGlow: false,

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import {
   recommendResource, recommendSongs, playlistDetail, neteaseSongToSong, getCookie,
@@ -25,13 +25,180 @@ const personalRoamSongs = ref<Song[]>([]);
 // 私人雷达 = 固定歌单 ID 3136952023
 const personalRadarCover = ref("");
 
-// 榜单精选
-const rankings = ref<{ id: number; name: string; coverImgUrl: string; songs: Song[]; loading: boolean }[]>([
-  { id: 19723756, name: "飙升榜", coverImgUrl: "", songs: [], loading: true },
-  { id: 3779629, name: "新歌榜", coverImgUrl: "", songs: [], loading: true },
-  { id: 3778678, name: "热歌榜", coverImgUrl: "", songs: [], loading: true },
-  { id: 2250011882, name: "抖音排行榜", coverImgUrl: "", songs: [], loading: true },
-]);
+// 榜单精选 - 支持用户自定义（持久化到 localStorage）
+interface RankingItem { id: number; name: string; coverImgUrl: string; songs: Song[]; loading: boolean; }
+
+/** 预设榜单池（用户可从中选择添加） */
+const RANKING_PRESETS: { id: number; name: string }[] = [
+  { id: 19723756, name: "飙升榜" },
+  { id: 3779629, name: "新歌榜" },
+  { id: 3778678, name: "热歌榜" },
+  { id: 2250011882, name: "抖音排行榜" },
+  { id: 14028249541, name: "全球说唱榜" },
+  { id: 2809513713, name: "欧美热歌榜" },
+  { id: 71384707, name: "古典榜" },
+  { id: 1978921795, name: "电音榜" },
+  { id: 991319590, name: "中文说唱榜" },
+  { id: 13372522766, name: "潮流风向榜" },
+  { id: 12911403728, name: "音乐合伙人推荐榜" },
+  { id: 12911589513, name: "音乐合伙人热歌榜" },
+  { id: 12911619970, name: "音乐合伙人留名榜" },
+  { id: 12911379734, name: "音乐合伙人高分新歌榜" },
+  { id: 12768855486, name: "音乐合伙人高分榜" },
+  { id: 5453912201, name: "黑胶VIP爱听榜" },
+  { id: 71385702, name: "ACG榜" },
+  { id: 745956260, name: "韩语榜" },
+];
+
+/** 默认榜单（首次启动时使用） */
+const DEFAULT_RANKINGS: { id: number; name: string }[] = [
+  { id: 19723756, name: "飙升榜" },
+  { id: 3779629, name: "新歌榜" },
+  { id: 3778678, name: "热歌榜" },
+  { id: 2250011882, name: "抖音排行榜" },
+  { id: 14028249541, name: "全球说唱榜" },
+  { id: 2809513713, name: "欧美热歌榜" },
+];
+
+/** 最大榜单数量 */
+const MAX_RANKINGS = 6;
+const RANKINGS_STORAGE_KEY = "zephyr-rankings";
+
+/** 从 localStorage 加载用户自定义榜单 */
+function loadCustomRankings(): { id: number; name: string }[] {
+  try {
+    const raw = localStorage.getItem(RANKINGS_STORAGE_KEY);
+    if (!raw) return DEFAULT_RANKINGS;
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.filter((r: any) => typeof r.id === "number" && typeof r.name === "string");
+    }
+    return DEFAULT_RANKINGS;
+  } catch { return DEFAULT_RANKINGS; }
+}
+
+/** 保存榜单到 localStorage */
+function saveCustomRankings(items: { id: number; name: string }[]) {
+  try { localStorage.setItem(RANKINGS_STORAGE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
+}
+
+const rankings = ref<RankingItem[]>(
+  loadCustomRankings().map(r => ({ ...r, coverImgUrl: "", songs: [], loading: true }))
+);
+
+/** 添加榜单弹窗状态 */
+const showAddRankingDialog = ref(false);
+/** 编辑模式（显示删除按钮） */
+const editMode = ref(false);
+/** 自定义 ID 输入 */
+const customRankingIdInput = ref("");
+const customRankingNameInput = ref("");
+
+/** 已添加的榜单 ID 集合（用于过滤预设池） */
+const addedRankingIds = computed(() => new Set(rankings.value.map(r => r.id)));
+
+/** 可添加的预设（未添加的） */
+const availablePresets = computed(() =>
+  RANKING_PRESETS.filter(p => !addedRankingIds.value.has(p.id))
+);
+
+/** 添加榜单 */
+async function addRanking(id: number, name?: string) {
+  if (rankings.value.length >= MAX_RANKINGS) {
+    toast.error("已达上限", `最多只能有 ${MAX_RANKINGS} 个榜单`);
+    return;
+  }
+  if (addedRankingIds.value.has(id)) {
+    toast.error("已存在", "该榜单已添加");
+    return;
+  }
+  // 从预设池取名字，否则用传入的 name
+  const preset = RANKING_PRESETS.find(p => p.id === id);
+  const finalName = name || preset?.name || `榜单 ${id}`;
+  rankings.value.push({ id, name: finalName, coverImgUrl: "", songs: [], loading: true });
+  saveCustomRankings(rankings.value.map(r => ({ id: r.id, name: r.name })));
+  showAddRankingDialog.value = false;
+  customRankingIdInput.value = "";
+  customRankingNameInput.value = "";
+  // 加载榜单数据
+  loadRankingData(rankings.value[rankings.value.length - 1]);
+  toast.success("已添加", finalName);
+}
+
+/** 通过自定义 ID 添加榜单 - 直接使用 API 返回的歌单名称 */
+async function addCustomRankingById() {
+  const idStr = customRankingIdInput.value.trim();
+  if (!idStr) { toast.error("请输入歌单 ID"); return; }
+  const id = parseInt(idStr);
+  if (!id || id <= 0) { toast.error("无效的 ID", "请输入数字"); return; }
+  if (addedRankingIds.value.has(id)) { toast.error("已存在", "该榜单已添加"); return; }
+  if (rankings.value.length >= MAX_RANKINGS) {
+    toast.error("已达上限", `最多只能有 ${MAX_RANKINGS} 个榜单`);
+    return;
+  }
+  // 先添加占位（loading 状态），然后通过 API 获取真实名字
+  const placeholderName = `加载中...`;
+  rankings.value.push({ id, name: placeholderName, coverImgUrl: "", songs: [], loading: true });
+  const newItem = rankings.value[rankings.value.length - 1];
+  showAddRankingDialog.value = false;
+  customRankingIdInput.value = "";
+  customRankingNameInput.value = "";
+  // 加载榜单数据，使用 API 返回的真实歌单名称
+  try {
+    const res = await playlistDetail(id, 0);
+    if (res.playlist?.name) {
+      newItem.name = res.playlist.name;  // 直接用 API 返回的歌单原名
+    } else {
+      // API 没返回名字，删除该项
+      const idx = rankings.value.findIndex(r => r.id === id);
+      if (idx >= 0) rankings.value.splice(idx, 1);
+      toast.error("加载失败", "未找到该歌单");
+      return;
+    }
+    saveCustomRankings(rankings.value.map(r => ({ id: r.id, name: r.name })));
+    newItem.coverImgUrl = res.playlist?.coverImgUrl || "";
+    const tracks = (res.playlist?.tracks || []).slice(0, 5);
+    newItem.songs = tracks.map(neteaseSongToSong);
+    newItem.loading = false;
+    loadRankingLiked(newItem.songs);
+    toast.success("已添加", newItem.name);
+  } catch (e) {
+    log.warn("recommend-view", `custom ranking ${id} failed`, { error: String(e) });
+    // 加载失败，删除占位项
+    const idx = rankings.value.findIndex(r => r.id === id);
+    if (idx >= 0) rankings.value.splice(idx, 1);
+    toast.error("加载失败", "请检查歌单 ID 是否正确");
+  }
+}
+
+/** 删除榜单（在编辑模式下使用） */
+function removeRanking(idx: number) {
+  const removed = rankings.value[idx];
+  rankings.value.splice(idx, 1);
+  saveCustomRankings(rankings.value.map(r => ({ id: r.id, name: r.name })));
+  toast.success("已删除", removed.name);
+}
+
+/** 加载单个榜单数据 - 始终使用 API 返回的歌单名称 */
+async function loadRankingData(r: RankingItem) {
+  try {
+    const res = await playlistDetail(r.id, 0);
+    // 始终用 API 返回的真实歌单名称覆盖（用户不可自定义重命名）
+    if (res.playlist?.name) {
+      r.name = res.playlist.name;
+      saveCustomRankings(rankings.value.map(rr => ({ id: rr.id, name: rr.name })));
+    }
+    r.coverImgUrl = res.playlist?.coverImgUrl || "";
+    const tracks = (res.playlist?.tracks || []).slice(0, 5);
+    r.songs = tracks.map(neteaseSongToSong);
+    r.loading = false;
+    log.info("recommend-view", `ranking ${r.name} loaded`, { count: r.songs.length });
+    loadRankingLiked(r.songs);
+  } catch (e) {
+    log.warn("recommend-view", `ranking ${r.name} failed`, { error: String(e) });
+    r.loading = false;
+  }
+}
 
 async function loadData() {
   loading.value = true;
@@ -67,18 +234,9 @@ async function loadData() {
   }).catch(e => { log.warn("recommend-view", "personal radar failed", { error: String(e) }); });
 
   loading.value = false;
-  // 并行加载榜单
+  // 并行加载榜单（使用新的 loadRankingData 函数）
   for (const r of rankings.value) {
-    playlistDetail(r.id, 0).then(res => {
-      r.coverImgUrl = res.playlist?.coverImgUrl || "";
-      const tracks = (res.playlist?.tracks || []).slice(0, 5);
-      r.songs = tracks.map(neteaseSongToSong);
-      r.loading = false;
-      log.info("recommend-view", `ranking ${r.name} loaded`, { count: r.songs.length });
-    }).catch(e => {
-      log.warn("recommend-view", `ranking ${r.name} failed`, { error: String(e) });
-      r.loading = false;
-    });
+    loadRankingData(r);
   }
 }
 
@@ -162,6 +320,48 @@ function openRanking(id: number) {
 const contextMenu = ref<{ visible: boolean; x: number; y: number; song: Song | null }>({ visible: false, x: 0, y: 0, song: null });
 const ctxSongLiked = ref(false);
 const showPlayNextSub = ref(false);
+
+/** 行内按钮：喜欢状态集合（neteaseId → liked） */
+const songLikedSet = ref<Set<number>>(new Set());
+
+/** 加载喜欢状态（用于榜单歌曲） */
+async function loadRankingLiked(songs: Song[]) {
+  if (songs.length === 0) return;
+  try {
+    const likeSet = await getCachedLikeList();
+    const liked = new Set<number>();
+    for (const s of songs) {
+      if (s.neteaseId && likeSet.has(s.neteaseId)) liked.add(s.neteaseId);
+    }
+    // 合并到现有集合
+    const merged = new Set(songLikedSet.value);
+    for (const id of liked) merged.add(id);
+    songLikedSet.value = merged;
+  } catch { /* ignore */ }
+}
+
+/** 行内：切换单首歌曲喜欢状态 */
+async function toggleSongLike(song: Song) {
+  if (song.source !== "netease" || !song.neteaseId) return;
+  const liked = songLikedSet.value.has(song.neteaseId);
+  try {
+    await songLike(song.neteaseId, 0, !liked);
+    if (!liked) { songLikedSet.value.add(song.neteaseId); addLikeCache(song.neteaseId); }
+    else { songLikedSet.value.delete(song.neteaseId); removeLikeCache(song.neteaseId); }
+    songLikedSet.value = new Set(songLikedSet.value);
+    toast.success(liked ? "已取消喜欢" : "已喜欢", song.name);
+  } catch (e) {
+    log.warn("recommend", "toggle song like failed", { error: String(e) });
+    toast.error("操作失败", "请稍后重试");
+  }
+}
+
+/** 行内：打开添加到歌单对话框（复用右键菜单的对话框） */
+function openAddToPlaylistDialogForRow(song: Song) {
+  if (song.source !== "netease") return;
+  addToPlaylistDialog.value = { visible: true, song };
+  getCachedPlaylists().then(pls => { playlists.value = pls; });
+}
 
 function onContextMenu(e: MouseEvent, song: Song) {
   e.preventDefault();
@@ -294,31 +494,96 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
     <!-- 榜单精选 -->
     <div class="section">
-      <h2 class="section-title">榜单精选</h2>
+      <div class="ranking-section-header">
+        <h2 class="section-title">榜单精选</h2>
+        <span class="ranking-count-hint">{{ rankings.length }} / {{ MAX_RANKINGS }}</span>
+        <!-- 编辑图标按钮（点击进入/退出编辑模式） -->
+        <button class="ranking-edit-toggle" :class="{ active: editMode }" :title="editMode ? '完成编辑' : '编辑榜单'" @click="editMode = !editMode">
+          <img src="/icons/edit.svg" alt="edit" class="ranking-edit-icon" />
+        </button>
+      </div>
       <div class="ranking-grid">
-        <div v-for="r in rankings" :key="r.id" class="ranking-card">
-          <div class="ranking-header" @click="openRanking(r.id)" style="cursor: pointer;">
+        <div v-for="(r, ridx) in rankings" :key="r.id" class="ranking-card" :class="{ 'ranking-card-editing': editMode }">
+          <div class="ranking-header" @click="!editMode && openRanking(r.id)" :style="{ cursor: editMode ? 'default' : 'pointer' }">
             <div class="ranking-cover">
               <img v-if="r.coverImgUrl" :src="r.coverImgUrl + '?param=100x100'" :alt="r.name" referrerpolicy="no-referrer" loading="lazy" />
               <Icon v-else name="music" :size="20" />
             </div>
-            <div class="ranking-name">{{ r.name }}</div>
-            <Icon name="chevronRight" :size="16" class="ranking-arrow" />
+            <div class="ranking-name truncate">{{ r.name }}</div>
+            <Icon v-if="!editMode" name="chevronRight" :size="16" class="ranking-arrow" />
+            <!-- 编辑模式下显示删除按钮 -->
+            <button v-if="editMode" class="ranking-delete-btn" title="删除榜单" @click.stop="removeRanking(ridx)">
+              <Icon name="trash" :size="16" />
+            </button>
           </div>
           <div v-if="r.loading" class="ranking-loading"><div class="spinner-sm" /></div>
           <div v-else class="ranking-songs">
-            <button v-for="(song, idx) in r.songs" :key="song.id"
+            <div v-for="(song, idx) in r.songs" :key="song.id"
               class="ranking-song" :class="{ active: song.id === store.currentSong?.id }"
               @click="playSong(song)"
               @contextmenu="onContextMenu($event, song)">
               <span class="ranking-idx">{{ idx + 1 }}</span>
               <span class="ranking-song-name truncate">{{ song.name }}</span>
+              <!-- 榜单精选只显示喜欢按钮（已喜欢时常驻红色，未喜欢时 hover 显示） -->
+              <div v-if="song.source === 'netease'" class="nmn-row-actions" :class="{ 'has-liked': song.neteaseId && songLikedSet.has(song.neteaseId) }">
+                <button class="nmn-action-btn nmn-action-like"
+                  :class="{ liked: song.neteaseId && songLikedSet.has(song.neteaseId) }"
+                  :title="song.neteaseId && songLikedSet.has(song.neteaseId) ? '取消喜欢' : '喜欢'"
+                  @click.stop="toggleSongLike(song)">
+                  <img v-if="song.neteaseId && songLikedSet.has(song.neteaseId)" src="/icons/like.svg" alt="liked" class="nmn-action-icon" />
+                  <img v-else src="/icons/not_like.svg" alt="not liked" class="nmn-action-icon" />
+                </button>
+              </div>
               <span class="ranking-artist truncate">{{ song.artist }}</span>
+            </div>
+          </div>
+        </div>
+        <!-- 添加榜单卡片（+号，仅在编辑模式且未达上限时显示） -->
+        <button v-if="editMode && rankings.length < MAX_RANKINGS" class="ranking-add-card" @click="showAddRankingDialog = true">
+          <Icon name="plus" :size="32" />
+          <span>添加榜单</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 添加榜单对话框（只能用右上角 close 图标关闭，不能点击背景关闭） -->
+    <Transition name="pl-dialog-fade">
+      <div v-if="showAddRankingDialog" class="pl-dialog-overlay">
+        <div class="add-ranking-dialog">
+          <div class="pl-dialog-header">
+            <h3>添加榜单</h3>
+            <button class="pl-dialog-close" title="关闭" @click="showAddRankingDialog = false">
+              <img src="/icons/close.svg" alt="close" class="pl-dialog-close-icon" />
             </button>
+          </div>
+          <div class="add-ranking-body nice-scroll">
+            <!-- 预设榜单 -->
+            <div v-if="availablePresets.length > 0" class="add-ranking-section">
+              <div class="add-ranking-section-title">预设榜单</div>
+              <div class="add-ranking-presets">
+                <button v-for="p in availablePresets" :key="p.id"
+                  class="add-ranking-preset-item"
+                  @click="addRanking(p.id)">
+                  <Icon name="plus" :size="12" />
+                  <span class="truncate">{{ p.name }}</span>
+                </button>
+              </div>
+            </div>
+            <!-- 自定义 ID 添加 -->
+            <div class="add-ranking-section">
+              <div class="add-ranking-section-title">自定义歌单 ID</div>
+              <div class="add-ranking-custom">
+                <input class="add-ranking-input" v-model="customRankingIdInput" placeholder="输入网易云歌单 ID（数字）" type="text" @keyup.enter="addCustomRankingById" />
+                <button class="add-ranking-submit" @click="addCustomRankingById">
+                  <Icon name="plus" :size="14" /><span>添加</span>
+                </button>
+              </div>
+              <p class="add-ranking-hint">歌单名称将自动从网易云获取。歌单 ID 可在网易云网页版歌单 URL 中找到，如 https://music.163.com/#/playlist?id=<strong>19723756</strong></p>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </Transition>
 
     <!-- 右键菜单（与搜索界面样式一致） -->
     <Transition name="ctx-fade">
@@ -436,13 +701,135 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .card-name { font-size: 13px; color: var(--text); font-weight: 500; line-height: 1.3; }
 
 /* 榜单精选 */
+.ranking-section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.ranking-count-hint { font-size: 12px; color: var(--text-tertiary); font-weight: 500; }
+/* 编辑图标按钮（标题右侧） */
+.ranking-edit-toggle {
+  margin-left: auto;
+  width: 28px; height: 28px;
+  border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+}
+.ranking-edit-toggle:hover { color: var(--accent); background: var(--bg-hover); }
+.ranking-edit-toggle.active { color: var(--accent); background: var(--accent-soft); }
+.ranking-edit-icon { width: 16px; height: 16px; pointer-events: none; display: block; }
 .ranking-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-.ranking-card { background: var(--bg-elev-1); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); }
-.ranking-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.ranking-card { background: var(--bg-elev-1); border-radius: var(--radius); padding: 16px; border: 1px solid var(--border); transition: border-color 0.15s; }
+.ranking-card-editing { border-color: var(--accent); }
+.ranking-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; position: relative; }
 .ranking-cover { width: 48px; height: 48px; border-radius: var(--radius-sm); overflow: hidden; flex-shrink: 0; background: var(--bg-elev-3); display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .ranking-cover img { width: 100%; height: 100%; object-fit: cover; }
-.ranking-name { font-size: 16px; font-weight: 700; color: var(--text); flex: 1; }
+.ranking-name { font-size: 16px; font-weight: 700; color: var(--text); flex: 1; min-width: 0; }
 .ranking-arrow { color: var(--text-tertiary); flex-shrink: 0; }
+/* 编辑模式下的删除按钮 */
+.ranking-delete-btn {
+  width: 28px; height: 28px;
+  border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #ff4d4f;
+  background: rgba(255,77,79,0.1);
+  border: 1px solid rgba(255,77,79,0.3);
+  cursor: pointer;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.ranking-delete-btn:hover {
+  background: #ff4d4f;
+  color: #fff;
+  border-color: #ff4d4f;
+}
+
+/* 添加榜单卡片（+号） */
+.ranking-add-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 200px;
+  background: transparent;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--text-tertiary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.18s var(--ease-out);
+  padding: 24px;
+}
+.ranking-add-card:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.ranking-add-card .icon-svg { width: 32px; height: 32px; }
+
+/* 添加榜单对话框 */
+.add-ranking-dialog {
+  width: 480px; max-width: 92vw; max-height: 70vh;
+  background: var(--bg-elev-3); border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.add-ranking-body { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px; }
+.add-ranking-section { display: flex; flex-direction: column; gap: 10px; }
+.add-ranking-section-title {
+  font-size: 12px; font-weight: 600; color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.4px;
+}
+.add-ranking-presets {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px;
+}
+.add-ranking-preset-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px; color: var(--text-secondary);
+  transition: all 0.15s;
+  text-align: left;
+  cursor: pointer;
+}
+.add-ranking-preset-item:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.add-ranking-preset-item .icon-svg { width: 12px; height: 12px; flex-shrink: 0; }
+.add-ranking-custom { display: flex; flex-direction: column; gap: 8px; }
+.add-ranking-input {
+  width: 100%; height: 38px; padding: 0 12px;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px; color: var(--text);
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.add-ranking-input:focus { border-color: var(--accent); }
+.add-ranking-input::placeholder { color: var(--text-tertiary); }
+.add-ranking-submit {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 38px;
+  background: var(--accent); color: #fff;
+  border-radius: var(--radius-sm);
+  font-size: 13px; font-weight: 600;
+  border: none; cursor: pointer;
+  transition: opacity 0.15s;
+}
+.add-ranking-submit:hover { opacity: 0.9; }
+.add-ranking-hint {
+  margin: 0; font-size: 11px; color: var(--text-tertiary); line-height: 1.5;
+}
+.add-ranking-hint strong { color: var(--accent); font-weight: 600; }
 .ranking-header:hover .ranking-arrow { color: var(--accent); }
 .ranking-loading { display: flex; justify-content: center; padding: 12px; }
 .ranking-songs { display: flex; flex-direction: column; gap: 2px; }
@@ -473,8 +860,19 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .pl-dialog { width: 380px; max-width: 90vw; max-height: 70vh; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 14px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden; }
 .pl-dialog-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .pl-dialog-header h3 { margin: 0; font-size: 16px; font-weight: 700; }
-.pl-dialog-close { color: var(--text-tertiary); transition: color 0.15s; }
-.pl-dialog-close:hover { color: var(--text); }
+.pl-dialog-close {
+  width: 32px; height: 32px;
+  border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s;
+  padding: 0;
+}
+.pl-dialog-close:hover { color: var(--text); background: var(--bg-hover); }
+.pl-dialog-close-icon { width: 18px; height: 18px; pointer-events: none; display: block; }
 .pl-dialog-list { flex: 1; overflow-y: auto; padding: 8px; }
 .pl-dialog-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px 12px; border-radius: 8px; text-align: left; transition: background 0.15s; }
 .pl-dialog-item:hover { background: var(--bg-hover); }

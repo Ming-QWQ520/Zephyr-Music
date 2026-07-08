@@ -1,4 +1,16 @@
 [target.x86_64-pc-windows-gnu]
-linker = "x86_64-w64-mingw32-clang"
-ar = "x86_64-w64-mingw32-ar"
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+linker = "/home/z/my-project/llvm-mingw-root/bin/x86_64-w64-mingw32-gcc"
+ar = "/home/z/my-project/llvm-mingw-root/bin/x86_64-w64-mingw32-ar"
+
+rustflags = [
+  "-C", "link-arg=-static",
+  "-C", "link-arg=-Wl,--allow-multiple-definition",
+  "-C", "link-arg=-Wl,-Bstatic",
+  "-C", "link-arg=-lwinpthread",
+]
+
+[profile.release]
+panic = "abort"
+codegen-units = 16
+opt-level = 2
+strip = true

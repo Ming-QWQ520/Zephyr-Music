@@ -4,6 +4,7 @@ import { usePlayerStore } from "@/stores/player";
 import { formatTime } from "@/composables/utils";
 import { log } from "@/composables/logger";
 import { useAudioVisualizer } from "@/composables/useAudioVisualizer";
+import { useToast } from "@/composables/useToast";
 import { likeSong, getCachedLikeList, addLikeCache, removeLikeCache } from "@/api/netease";
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
@@ -12,6 +13,7 @@ import type { LyricLine } from "@/types";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
+const toast = useToast();
 
 // ===== 喜欢歌曲 =====
 const liked = ref(false);
@@ -505,8 +507,8 @@ const sungWordCount = computed(() => {
   return count;
 });
 
-/** 每个字符的擦除进度数组 (0~1)，rAF 逐帧更新 */
-const charProgress = ref<number[]>([]);
+/** 每个单词的擦除进度数组 (0~1)，rAF 逐帧更新 - 用于逐字渲染（按单词整体擦除） */
+const wordProgress = ref<number[]>([]);
 let wipeRAF = 0;
 
 /** 直接从 <audio> 元素读取 currentTime（比 store 更频繁，真正逐帧） */
@@ -516,19 +518,37 @@ function getAudioTime(): number {
   return store.currentTime;
 }
 
-/** 整行擦除百分比 (0~100)，rAF 逐帧更新 */
+/** 整行擦除百分比 (0~100)，rAF 逐帧更新 - 仅作为 fallback */
 const wipePercent = ref(0);
+
+/** 当前活动行的 word 数组（每个 word 作为一个整体擦除单元） */
+const activeWords = ref<{ text: string; start: number; duration: number }[]>([]);
+
+/** 监听活动行变化，重新计算 activeWords */
+watch([activeIndex, parsedLyrics], () => {
+  const idx = activeIndex.value;
+  const line = (idx >= 0) ? parsedLyrics.value[idx] : null;
+  if (!line || !line.words || line.words.length === 0) {
+    activeWords.value = [];
+    wordProgress.value = [];
+    return;
+  }
+  activeWords.value = line.words.map(w => ({ text: w.text, start: w.start, duration: w.duration }));
+  wordProgress.value = new Array(line.words.length).fill(0);
+}, { immediate: true });
 
 function updateWipe() {
   const idx = activeIndex.value;
   const line = (idx >= 0) ? parsedLyrics.value[idx] : null;
   if (!line || !line.words || line.words.length === 0) {
     wipePercent.value = 0;
+    wordProgress.value = [];
     wipeRAF = requestAnimationFrame(updateWipe);
     return;
   }
   const t = getAudioTime();
-  // 按字符数加权计算整行进度
+
+  // 按字符数加权计算整行进度（仅作为 fallback CSS 变量）
   let sungChars = 0;
   let totalChars = 0;
   for (const w of line.words) {
@@ -542,6 +562,20 @@ function updateWipe() {
     }
   }
   wipePercent.value = Math.max(0, Math.min(100, (sungChars / totalChars) * 100));
+
+  // 更新每个单词的整体进度（单词内所有字符共享同一进度，整体一起擦除）
+  const words = activeWords.value;
+  const prog = new Array(words.length).fill(0);
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (t >= w.start + w.duration) {
+      prog[i] = 1;
+    } else if (t >= w.start) {
+      prog[i] = Math.max(0, Math.min(1, (t - w.start) / w.duration));
+    }
+  }
+  wordProgress.value = prog;
+
   wipeRAF = requestAnimationFrame(updateWipe);
 }
 onMounted(() => { wipeRAF = requestAnimationFrame(updateWipe); });
@@ -560,6 +594,8 @@ function onLyricWheel(e: WheelEvent) {
   // 标准滚动方向：滚轮向下( deltaY>0 )→ 内容上移查看下方(偏移减小)
   //               滚轮向上( deltaY<0 )→ 内容下移查看上方(偏移增大)
   userScrollY.value -= e.deltaY;
+  // 歌词选择模式下不自动回正（让用户自由浏览）
+  if (lyricSelectMode.value) return;
   // 重置定时器：2秒后归零，自动滚动回当前播放歌词
   if (userScrollTimer) clearTimeout(userScrollTimer);
   userScrollTimer = setTimeout(() => {
@@ -622,8 +658,10 @@ onUnmounted(() => { lineRO?.disconnect(); if (lineHeightRAF) cancelAnimationFram
 
 // Each line's distance (in number of lines) from active, with interlude gaps collapsed.
 function lineDistance(idx: number): number {
-  if (activeIndex.value < 0) return idx;
-  return idx - activeIndex.value;
+  // 歌词选择模式下使用冻结的 activeIndex，停止自动滚动
+  const active = lyricSelectMode.value ? frozenActiveIndex.value : activeIndex.value;
+  if (active < 0) return idx;
+  return idx - active;
 }
 
 // RNP-style transform computation:
@@ -833,6 +871,7 @@ function lineStyle(idx: number): CSSProperties {
   if (!t) return {};
   const isActive = idx === activeIndex.value;
   const isHovered = idx === hoveredLine.value;
+  const inSelectMode = lyricSelectMode.value;
   // Uniform font size across active/inactive lines. Visual differentiation
   // between active and inactive is done via the `scale` transform (active=1,
   // inactive≈0.8) plus color/opacity, NOT font size. This keeps measured
@@ -848,20 +887,23 @@ function lineStyle(idx: number): CSSProperties {
 
   // Hover: no scale change (avoids transform reflow → better performance).
   // The visual hover effect is done purely via CSS (color + opacity + translateX).
-  const finalScale = t.scale;
+  // 歌词选择模式下：所有行 scale=1（不再缩小），方便阅读和点击
+  const finalScale = inSelectMode ? 1 : t.scale;
 
-  // Transform: RNP order = translateX(left) translateY(top+extraTop) scale rotate
+  // 歌词选择模式下：扩大歌词间距（每行额外加 16px 间距）
+  const extraSpacing = inSelectMode ? 16 : 0;
+
+  // Transform: RNP order = translateX(left) translateY(top+extraTop+spacing) scale rotate
   const parts: string[] = [];
-  if (t.left) parts.push(`translateX(${t.left}px)`);
-  parts.push(`translateY(${t.top + t.extraTop}px)`);
+  if (t.left && !inSelectMode) parts.push(`translateX(${t.left}px)`);
+  parts.push(`translateY(${t.top + t.extraTop + extraSpacing}px)`);
   parts.push(`scale(${finalScale})`);
-  if (t.rotate) parts.push(`rotate(${t.rotate}deg)`);
+  if (t.rotate && !inSelectMode) parts.push(`rotate(${t.rotate}deg)`);
   const transform = parts.join(" ");
 
-  // Hover: no opacity/blur/scale change (just CSS background on hover).
-  // This avoids transform reflow and keeps performance high.
-  const finalOpacity = t.opacity;
-  const finalBlur = t.blur;
+  // 歌词选择模式下：取消模糊效果，所有行 opacity=1
+  const finalOpacity = inSelectMode ? 1 : t.opacity;
+  const finalBlur = inSelectMode ? 0 : t.blur;
 
   const height = interlude ? "0" : "auto";
 
@@ -875,7 +917,9 @@ function lineStyle(idx: number): CSSProperties {
     maxWidth: "100%",
     height,
     visibility: t.outOfRange || interlude ? "hidden" : "visible",
-    transitionDelay: `${t.delay}ms`,
+    // 选择模式下禁用过渡和延迟
+    transition: inSelectMode ? "none" : undefined,
+    transitionDelay: inSelectMode ? "0ms" : `${t.delay}ms`,
   };
   return style;
 }
@@ -904,11 +948,14 @@ const lyricContainerStyle = computed(() => ({
   "--timing": transitionTiming.value,
   // 用户滚轮偏移：整体上下移动歌词容器
   transform: `translateY(${userScrollY.value}px)`,
+  // 歌词选择模式下禁用过渡（防止自动滚动动画）
   // 平滑滚动：开启时滚动有过渡效果（默认关闭，即时响应）
   // 自动回正时始终有过渡（0.4s ease-out）
-  transition: settings.smoothLyricScroll
-    ? "transform 0.15s ease-out"
-    : (userScrollTimer ? "none" : "transform 0.4s ease-out"),
+  transition: lyricSelectMode.value
+    ? "none"
+    : (settings.smoothLyricScroll
+      ? "transform 0.15s ease-out"
+      : (userScrollTimer ? "none" : "transform 0.4s ease-out")),
 } as Record<string, string>));
 
 // ----- Play mode (shared with PlayerBar) -----
@@ -1009,16 +1056,141 @@ const coverUrl = computed(() => {
 
 // ----- Lyrics seek-on-click -----
 function seekToLyric(idx: number) {
+  // 歌词选择模式下：左键点击切换勾选
+  if (lyricSelectMode.value) {
+    toggleLyricLineSelection(idx);
+    return;
+  }
   const l = parsedLyrics.value[idx];
   if (l) store.seek(l.time);
+}
+
+// ===== 歌词选择模式（右键进入，点击选中行，可复制） =====
+const lyricSelectMode = ref(false);
+/** 选中的歌词行索引集合（Set） */
+const selectedLyricLines = ref<Set<number>>(new Set());
+/** 进入选择模式时冻结的 activeIndex（用于停止自动滚动） - 必须是 ref 才能触发 computed 重新计算 */
+const frozenActiveIndex = ref(-1);
+let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 翻译开关按钮可见性（鼠标在右下角区域附近时显示） */
+const translateBtnVisible = ref(false);
+
+/** 右键歌词进入选择模式 */
+function onLyricContextMenu(idx: number, e: MouseEvent) {
+  if (lyricSelectMode.value) return;
+  e.preventDefault();
+  e.stopPropagation();
+  enterLyricSelectMode();
+}
+
+/** 移动端：长按歌词 500ms 进入选择模式 */
+function onLyricTouchStart(idx: number, e: TouchEvent | MouseEvent) {
+  if (lyricSelectMode.value) return;
+  if (e instanceof MouseEvent) return;
+  longPressTimer = setTimeout(() => {
+    enterLyricSelectMode();
+  }, 500);
+}
+function onLyricTouchEnd() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+}
+function onLyricTouchMove() {
+  if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+}
+
+/** 进入歌词选择模式 */
+function enterLyricSelectMode() {
+  lyricSelectMode.value = true;
+  // 冻结当前 activeIndex，停止自动滚动
+  frozenActiveIndex.value = activeIndex.value;
+  // 清除用户滚动偏移和回正定时器
+  userScrollY.value = 0;
+  if (userScrollTimer) { clearTimeout(userScrollTimer); userScrollTimer = null; }
+  selectedLyricLines.value = new Set();
+  if (typeof document !== "undefined") {
+    document.body.classList.add("lyric-select-mode");
+  }
+  log.info("now-playing", "entered lyric select mode", { frozenIndex: frozenActiveIndex.value });
+}
+
+/** 退出歌词选择模式 */
+function exitLyricSelectMode() {
+  if (!lyricSelectMode.value) return;
+  lyricSelectMode.value = false;
+  selectedLyricLines.value = new Set();
+  frozenActiveIndex.value = -1;
+  // 清除用户滚动偏移
+  userScrollY.value = 0;
+  if (userScrollTimer) { clearTimeout(userScrollTimer); userScrollTimer = null; }
+  if (typeof document !== "undefined") {
+    document.body.classList.remove("lyric-select-mode");
+  }
+}
+
+/** 勾选/取消勾选一行歌词（左键点击切换） */
+function toggleLyricLineSelection(idx: number) {
+  const s = new Set(selectedLyricLines.value);
+  if (s.has(idx)) s.delete(idx);
+  else s.add(idx);
+  selectedLyricLines.value = s;
+}
+
+/** 全选歌词 */
+function selectAllLyrics() {
+  const s = new Set<number>();
+  for (let i = 0; i < parsedLyrics.value.length; i++) s.add(i);
+  selectedLyricLines.value = s;
+}
+
+/** 复制选中的歌词到剪贴板 */
+async function copySelectedLyrics() {
+  if (selectedLyricLines.value.size === 0) return;
+  const indices = Array.from(selectedLyricLines.value).sort((a, b) => a - b);
+  const lines: string[] = [];
+  for (const idx of indices) {
+    const line = parsedLyrics.value[idx];
+    if (!line || line.isInterlude) continue;
+    let text = line.text || "";
+    // 包含翻译
+    if (line.translation && settings.showTranslation) {
+      text += "\n" + line.translation;
+    }
+    lines.push(text);
+  }
+  const text = lines.join("\n");
+  try {
+    await navigator.clipboard.writeText(text);
+    log.info("now-playing", "lyrics copied", { count: lines.length, length: text.length });
+    toast.success("复制成功", `已复制 ${lines.length} 行歌词到剪贴板`);
+  } catch {
+    // fallback
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    document.body.removeChild(ta);
+    toast.success("复制成功", `已复制 ${lines.length} 行歌词到剪贴板`);
+  }
 }
 
 // ----- Keyboard shortcuts -----
 function onKey(ev: KeyboardEvent) {
   if (ev.key === "Escape") {
+    // 优先退出歌词选择模式
+    if (lyricSelectMode.value) { exitLyricSelectMode(); return; }
     if (showSettings.value) showSettings.value = false;
     else if (showQueue.value) showQueue.value = false;
     else close();
+    return;
+  }
+  // 歌词选择模式下：允许 Ctrl+C 复制（不拦截），其他快捷键暂停
+  if (lyricSelectMode.value) {
+    // Ctrl+C / Cmd+C 放行
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "c") return;
+    // Ctrl+A 全选歌词放行
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") return;
     return;
   }
   if (ev.code === "Space") { ev.preventDefault(); store.togglePlay(); }
@@ -1033,6 +1205,11 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener("keydown", onKey);
   if (hideTopbarTimer) clearTimeout(hideTopbarTimer);
+  if (longPressTimer) clearTimeout(longPressTimer);
+  // 清理歌词选择模式
+  if (lyricSelectMode.value) {
+    document.body.classList.remove("lyric-select-mode");
+  }
 });
 
 const queueList = computed(() => store.queue);
@@ -1094,6 +1271,23 @@ const queueList = computed(() => store.queue);
       </div>
     </header>
 
+    <!-- 歌词选择模式提示条 -->
+    <div v-if="lyricSelectMode" class="lyric-select-bar">
+      <span class="lyric-select-hint">已选 {{ selectedLyricLines.size }} 行</span>
+      <button class="lyric-select-btn" title="全选" @click="selectAllLyrics">
+        <Icon name="list" :size="14" />
+        <span>全选</span>
+      </button>
+      <button class="lyric-select-btn lyric-select-copy" title="复制选中歌词" :disabled="selectedLyricLines.size === 0" @click="copySelectedLyrics">
+        <Icon name="download" :size="14" />
+        <span>复制</span>
+      </button>
+      <button class="lyric-select-exit" title="退出选择模式（Esc）" @click="exitLyricSelectMode">
+        <Icon name="close" :size="16" />
+        <span>退出</span>
+      </button>
+    </div>
+
     <!-- Main content: cover (left) + lyrics (right) -->
     <main class="np-main">
       <!-- Left: cover + info + controls -->
@@ -1149,7 +1343,14 @@ const queueList = computed(() => store.queue);
           </div>
           <!-- 音质选择 -->
           <div class="level-row">
-            <button class="level-pill" @click="cycleAudioLevel">
+            <button
+              class="level-pill"
+              :class="{
+                'level-hires': settings.audioLevel === 'hires',
+                'level-lossless': settings.audioLevel === 'lossless' || settings.audioLevel === 'jymaster' || settings.audioLevel === 'jyeffect' || settings.audioLevel === 'sky' || settings.audioLevel === 'dolby',
+              }"
+              @click="cycleAudioLevel"
+            >
               {{ currentLevelLabel }}
             </button>
           </div>
@@ -1220,9 +1421,15 @@ const queueList = computed(() => store.queue);
                 interlude: line.isInterlude,
                 'has-translation': !!line.translation && settings.showTranslation,
                 hovered: idx === hoveredLine,
+                'lyric-selected': lyricSelectMode && selectedLyricLines.has(idx),
+                'lyric-select-mode': lyricSelectMode,
               }"
               :style="lineStyle(idx)"
               @click="seekToLyric(idx)"
+              @contextmenu="onLyricContextMenu(idx, $event)"
+              @touchstart="onLyricTouchStart(idx, $event)"
+              @touchend="onLyricTouchEnd()"
+              @touchmove="onLyricTouchMove()"
               @mouseenter="onLyricEnter(idx)"
               @mouseleave="onLyricLeave()"
             >
@@ -1235,8 +1442,14 @@ const queueList = computed(() => store.queue);
                 }"
                 :style="line.words && line.words.length > 0 && idx === activeIndex ? { '--wipe-percent': wipePercent + '%' } : {}"
               >
-                <template v-if="line.words && line.words.length > 0">
-                  {{ line.text }}
+                <template v-if="line.words && line.words.length > 0 && idx === activeIndex">
+                  <!-- 按 word 整体擦除：每个 word 内所有字符共享同一进度，整体一起从灰变白 -->
+                  <span
+                    v-for="(w, wi) in activeWords"
+                    :key="wi"
+                    class="yrc-word"
+                    :style="{ '--word-progress': (wordProgress[wi] ?? 0).toFixed(3) }"
+                  >{{ w.text }}</span>
                 </template>
                 <template v-else>{{ line.text }}</template>
               </span>
@@ -1297,6 +1510,19 @@ const queueList = computed(() => store.queue);
         </div>
       </aside>
     </Transition>
+
+    <!-- 翻译开关按钮（右下角，hover 区域附近时显示） -->
+    <div class="translate-toggle-zone" @mouseenter="translateBtnVisible = true" @mouseleave="translateBtnVisible = false">
+      <button
+        v-show="translateBtnVisible"
+        class="translate-toggle-btn"
+        :class="{ active: settings.showTranslation }"
+        :title="settings.showTranslation ? '关闭翻译' : '开启翻译'"
+        @click="settings.showTranslation = !settings.showTranslation"
+      >
+        <img src="/icons/translate.svg" alt="translate" class="translate-toggle-icon" />
+      </button>
+    </div>
 
     <!-- Settings -->
     <SettingsPanel :visible="showSettings" mode="sidebar" @close="showSettings = false" />
@@ -1597,6 +1823,30 @@ const queueList = computed(() => store.queue);
   font-size: 11px; font-weight: 500; transition: all 0.15s;
 }
 .level-pill:hover { color: var(--accent); background: var(--accent-soft); }
+/* Hi-Res 金色 - 标志性 Hi-Res Audio 金色 */
+.level-pill.level-hires {
+  background: linear-gradient(135deg, #FFD700, #FFA500);
+  color: #1a1a1a;
+  font-weight: 700;
+  border: 1px solid #FFD700;
+  box-shadow: 0 0 12px rgba(255, 215, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+.level-pill.level-hires:hover {
+  background: linear-gradient(135deg, #FFE55C, #FFB733);
+  box-shadow: 0 0 18px rgba(255, 215, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+/* 无损/超清母带等高品质音质 - 银白色微光 */
+.level-pill.level-lossless {
+  background: linear-gradient(135deg, #E8E8E8, #B0B0B0);
+  color: #1a1a1a;
+  font-weight: 600;
+  border: 1px solid #C0C0C0;
+  box-shadow: 0 0 8px rgba(192, 192, 192, 0.4);
+}
+.level-pill.level-lossless:hover {
+  background: linear-gradient(135deg, #F5F5F5, #C8C8C8);
+}
 /* When hidePlayerControls is on, ALL playback controls (progress bar, play/
  * prev/next/shuffle buttons, volume slider) collapse to zero height and
  * disappear entirely. Only the cover and song info remain, and the cover
@@ -1754,19 +2004,29 @@ const queueList = computed(() => store.queue);
   font-weight: inherit;
   text-align: inherit;
 }
-/* 逐字歌词平滑擦除效果（从左到右，单一分界点） */
+/* 逐字歌词平滑擦除效果（按 word 整体擦除，单词内字符一起变白） */
 .lyric-text.yrc-wipe {
+  /* 整体保持透明，让每个 word 独立着色 */
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  text-shadow: none;
+  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.3));
+}
+.lyric-text.yrc-wipe .yrc-word {
+  /* 每个 word 根据 --word-progress 在灰色和白色之间插值
+     word 内所有字符共享同一进度，整体一起从灰变白（不再按字母拆分） */
   background-image: linear-gradient(
     to right,
-    #fff var(--wipe-percent, 0%),
-    rgba(255, 255, 255, 0.3) var(--wipe-percent, 0%)
+    #fff calc(var(--word-progress, 0) * 100%),
+    rgba(255, 255, 255, 0.3) calc(var(--word-progress, 0) * 100%)
   );
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
   color: transparent;
-  text-shadow: none;
-  filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.3));
+  /* 让 inline 元素在换行时背景仍按 word 独立计算 */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 /* 非 YRC 行的普通歌词保持原有颜色 */
 .lyric-text.text-shadow { text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5); }
@@ -1902,5 +2162,144 @@ const queueList = computed(() => store.queue);
   .cover-wrap { width: min(260px, 60vw); }
   .controls-block { width: 100%; max-width: 480px; }
   .vol-cluster { margin-left: 0; }
+}
+
+/* ===== 歌词选择模式（点击选中行，无勾选框） ===== */
+/* 选择模式下：歌词行可点击选中 */
+.lyric-line.lyric-select-mode {
+  cursor: pointer !important;
+}
+/* 选中行的高亮背景（替代勾选框） */
+.lyric-line.lyric-selected {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+.lyric-line.lyric-select-mode:hover:not(.lyric-selected) {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+}
+/* 选择模式下取消 yrc 擦除效果（让文字可读） */
+.lyric-line.lyric-select-mode .lyric-text.yrc-wipe,
+.lyric-line.lyric-select-mode .lyric-text.yrc-wipe .yrc-word {
+  -webkit-text-fill-color: rgba(255, 255, 255, 0.85) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+  background-image: none !important;
+}
+
+/* 歌词选择模式提示条 */
+.lyric-select-bar {
+  position: absolute;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-full);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+  animation: slide-down 0.25s var(--ease-out);
+}
+.lyric-select-hint {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+  margin-right: 4px;
+}
+.lyric-select-btn,
+.lyric-select-exit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-full);
+  color: #fff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.lyric-select-btn:hover,
+.lyric-select-exit:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.lyric-select-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.lyric-select-btn.lyric-select-copy:not(:disabled) {
+  background: var(--accent, #c20c0c);
+  border-color: var(--accent, #c20c0c);
+}
+.lyric-select-btn.lyric-select-copy:not(:disabled):hover {
+  background: var(--accent-strong, #e23b3b);
+  border-color: var(--accent-strong, #e23b3b);
+}
+.lyric-select-btn .icon-svg,
+.lyric-select-exit .icon-svg { width: 14px; height: 14px; }
+@keyframes slide-down {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* ===== 翻译开关按钮（右下角，hover 区域附近时显示） ===== */
+.translate-toggle-zone {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 120px;
+  height: 120px;
+  z-index: 100;
+  /* 透明热区，鼠标进入时显示按钮 */
+  pointer-events: auto;
+}
+.translate-toggle-btn {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 跟播放控件 ctrl-btn 一致的基础样式 */
+  background: transparent;
+  border: none;
+  color: #fff;  /* 图标颜色固定白色 */
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, transform 0.12s;
+  padding: 0;
+}
+.translate-toggle-btn:hover {
+  /* 跟 ctrl-btn:hover 一致：白色图标 + 10% 白色背景 */
+  color: #fff;
+  background: rgba(255, 255, 255, 0.1);
+}
+.translate-toggle-btn:active {
+  transform: scale(0.92);
+}
+/* 高亮 = 翻译开启：白色高亮背景（比 hover 更明显），图标保持白色 */
+.translate-toggle-btn.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.22);
+}
+.translate-toggle-btn.active:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.3);
+}
+.translate-toggle-icon {
+  width: 20px;
+  height: 20px;
+  pointer-events: none;
+  display: block;
 }
 </style>

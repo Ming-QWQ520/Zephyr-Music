@@ -230,7 +230,10 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
         songLoading = false; return;
       }
       const song = store.currentSong;
-      log.info(TAG, "song changed", { url: url.slice(0, 120), name: song?.name });
+      // 记录当前播放状态：URL 变化时如果之前是 playing，恢复后也应继续 playing
+      // （修复重启后 URL 异步获取完成时 isPlaying 还是 false 的问题）
+      const shouldAutoPlay = store.isPlaying || (song as any)?._restorePlaying === true;
+      log.info(TAG, "song changed", { url: url.slice(0, 120), name: song?.name, shouldAutoPlay });
       if (isLocalFile(url)) {
         log.info(TAG, "using Rodio");
         usingRodio.value = true;
@@ -239,7 +242,21 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
         try {
           const duration = await rodioPlay(url);
           log.info(TAG, "rodio play started", { duration });
-          store.setDuration(duration); store.setPlaying(true); startPolling();
+          store.setDuration(duration);
+          // 恢复进度（如果是重启恢复场景）
+          if ((song as any)?._restoreTime && (song as any)._restoreTime > 0) {
+            try {
+              await import("@tauri-apps/api/core").then(m => m.invoke("rodio_seek", { position: (song as any)._restoreTime }));
+              log.info(TAG, "rodio restored position", { pos: (song as any)._restoreTime });
+            } catch { /* ignore */ }
+            (song as any)._restoreTime = 0;
+          }
+          if (shouldAutoPlay) {
+            store.setPlaying(true);
+            startPolling();
+          }
+          // 清除恢复标记
+          if (song) (song as any)._restorePlaying = false;
         } catch (e) { log.error(TAG, "rodio play failed", { error: String(e) }); store.setPlaying(false); }
       } else {
         log.info(TAG, "using <audio>");
@@ -248,10 +265,27 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
         const audio = ensureAudio();
         if (!audio) { songLoading = false; return; }
         audio.src = url; audio.load();
-        if (store.isPlaying) {
+        // 恢复进度（重启场景）：等待 loadedmetadata 后再 seek
+        if ((song as any)?._restoreTime && (song as any)._restoreTime > 0) {
+          const restoreT = (song as any)._restoreTime;
+          const onReady = () => {
+            try {
+              if (isFinite(audio.duration) && restoreT < audio.duration) {
+                audio.currentTime = restoreT;
+                log.info(TAG, "audio restored position", { pos: restoreT, dur: audio.duration });
+              }
+            } catch { /* ignore */ }
+            audio.removeEventListener("loadedmetadata", onReady);
+            (song as any)._restoreTime = 0;
+          };
+          audio.addEventListener("loadedmetadata", onReady);
+        }
+        if (shouldAutoPlay) {
           audio.play().then(() => log.info(TAG, "play() ok", { dur: audio.duration }))
             .catch((e) => log.error(TAG, "play() failed", { error: String(e) }));
         }
+        // 清除恢复标记
+        if (song) (song as any)._restorePlaying = false;
       }
       // 启动 scrobble tick
       startScrobbleTick();

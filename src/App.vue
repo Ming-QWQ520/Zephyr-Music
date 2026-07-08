@@ -51,7 +51,16 @@ useAudioBinding(audioRef);
 const showHomeSettings = ref(false);
 const showNowPlaying = computed(() => store.currentView === "nowplaying");
 
-/** 是否启用壁纸背景 */
+/** 主题切换（light / dark / auto） */
+type ColorMode = "light" | "dark" | "auto";
+function toggleColorMode() {
+  const order: ColorMode[] = ["light", "dark", "auto"];
+  const cur = (settings.colorMode as ColorMode) || "light";
+  const next = order[(order.indexOf(cur) + 1) % order.length];
+  settings.colorMode = next as any;
+}
+
+/** 是否启用壁纸背景（首页/搜索/歌单等所有界面，但播放界面有自己的背景层） */
 const hasWallpaper = computed(() =>
   homeSettings.bgType === "image" && !!homeSettings.bgImage && !showNowPlaying.value
 );
@@ -81,6 +90,59 @@ onMounted(() => {
   document.addEventListener("contextmenu", (e) => {
     e.preventDefault();
   });
+  // 屏蔽所有网页快捷键（Ctrl+R/F5 刷新、Ctrl+F 查找、F11 全屏、Ctrl+S 保存、Ctrl+P 打印、Ctrl+/- 缩放等）
+  document.addEventListener("keydown", (e) => {
+    const k = e.key;
+    const ctrl = e.ctrlKey || e.metaKey;
+    // F5 / Ctrl+R / Ctrl+Shift+R = 刷新
+    if (k === "F5" || (ctrl && k.toLowerCase() === "r")) { e.preventDefault(); return; }
+    // F11 = 全屏
+    if (k === "F11") { e.preventDefault(); return; }
+    // Ctrl+F = 查找
+    if (ctrl && k.toLowerCase() === "f") { e.preventDefault(); return; }
+    // Ctrl+S = 保存
+    if (ctrl && k.toLowerCase() === "s") { e.preventDefault(); return; }
+    // Ctrl+P = 打印
+    if (ctrl && k.toLowerCase() === "p") { e.preventDefault(); return; }
+    // Ctrl+O = 打开文件
+    if (ctrl && k.toLowerCase() === "o") { e.preventDefault(); return; }
+    // Ctrl+G = 查找下一个
+    if (ctrl && k.toLowerCase() === "g") { e.preventDefault(); return; }
+    // Ctrl+H = 历史
+    if (ctrl && k.toLowerCase() === "h") { e.preventDefault(); return; }
+    // Ctrl+J = 下载
+    if (ctrl && k.toLowerCase() === "j") { e.preventDefault(); return; }
+    // Ctrl+D = 收藏夹
+    if (ctrl && k.toLowerCase() === "d") { e.preventDefault(); return; }
+    // Ctrl+W = 关闭窗口（让 Tauri 自己处理）
+    if (ctrl && k.toLowerCase() === "w") { e.preventDefault(); return; }
+    // Ctrl+N = 新窗口
+    if (ctrl && k.toLowerCase() === "n") { e.preventDefault(); return; }
+    // Ctrl+T = 新标签页
+    if (ctrl && k.toLowerCase() === "t") { e.preventDefault(); return; }
+    // Ctrl+L = 地址栏
+    if (ctrl && k.toLowerCase() === "l") { e.preventDefault(); return; }
+    // Ctrl+U = 查看源码
+    if (ctrl && k.toLowerCase() === "u") { e.preventDefault(); return; }
+    // Ctrl+加号/减号/0 = 缩放
+    if (ctrl && (k === "+" || k === "-" || k === "=" || k === "0")) { e.preventDefault(); return; }
+    // F3 = 查找下一个
+    if (k === "F3") { e.preventDefault(); return; }
+    // F7 = 光标浏览
+    if (k === "F7") { e.preventDefault(); return; }
+    // Alt+方向键 = 后退/前进
+    if (e.altKey && (k === "ArrowLeft" || k === "ArrowRight")) { e.preventDefault(); return; }
+    // Ctrl+Shift+I / F12 = 开发者工具
+    if ((ctrl && e.shiftKey && k.toLowerCase() === "i") || k === "F12") { e.preventDefault(); return; }
+    // Ctrl+Shift+J = 控制台
+    if (ctrl && e.shiftKey && k.toLowerCase() === "j") { e.preventDefault(); return; }
+    // Ctrl+Shift+C = 元素检查
+    if (ctrl && e.shiftKey && k.toLowerCase() === "c") { e.preventDefault(); return; }
+    // Ctrl+Shift+Delete = 清除浏览数据
+    if (ctrl && e.shiftKey && k.toLowerCase() === "delete") { e.preventDefault(); return; }
+    // Ctrl+Tab / Ctrl+Shift+Tab = 切换标签（应用内无标签，禁用）
+    if (ctrl && k === "Tab") { e.preventDefault(); return; }
+  }, true);  // capture 阶段拦截，确保在其他 handler 之前
   // 点击外部关闭用户下拉框
   document.addEventListener("click", (e) => {
     if (showLoginDropdown.value) {
@@ -90,11 +152,15 @@ onMounted(() => {
       }
     }
   });
-  // 恢复上次播放的歌曲：重新获取 URL 和歌词
+  // 恢复上次播放的歌曲：重新获取 URL 和歌词，获取成功后自动开始播放并恢复到上次进度
   const song = store.currentSong;
+  const savedTime = store.currentTime;  // 保存上次播放位置，URL 获取过程中会被重置
   if (song) {
-    log.info("app", "restoring last song", { name: song.name, hasUrl: !!song.url, hasLrc: !!song.lrc });
+    log.info("app", "restoring last song", { name: song.name, hasUrl: !!song.url, hasLrc: !!song.lrc, savedTime });
     if (song.source === "netease" && song.neteaseId) {
+      // 标记恢复播放和恢复进度，让 useAudioBinding 在 URL 加载完成后处理
+      (song as any)._restorePlaying = true;
+      (song as any)._restoreTime = savedTime > 0 ? savedTime : 0;
       song.url = "";
       song.lrc = "";
       (song as any).yrcText = "";
@@ -105,15 +171,57 @@ onMounted(() => {
         store.queue[idx].lrc = "";
         (store.queue[idx] as any).yrcText = "";
         (store.queue[idx] as any).tlyricText = "";
+        (store.queue[idx] as any)._restorePlaying = true;
+        (store.queue[idx] as any)._restoreTime = (song as any)._restoreTime;
       }
+      store.lyrics = [];
+      // 并行获取 URL 和歌词
       const urlP = store._ensureNeteaseUrl(song);
       const lrcP = store._ensureNeteaseLyrics(song).then(() => {
         if (store.currentSong?.id === song.id) store.loadLyrics(song);
       });
-      store.lyrics = [];
-      void urlP; void lrcP;
+      // URL 获取失败时清理恢复标记（避免下次切歌误触发）
+      urlP.then(() => {
+        if (!song.url) {
+          (song as any)._restorePlaying = false;
+          (song as any)._restoreTime = 0;
+          log.warn("app", "restore url failed - song will not auto-play", { name: song.name });
+        }
+      }).catch((e) => {
+        (song as any)._restorePlaying = false;
+        (song as any)._restoreTime = 0;
+        log.warn("app", "restore url error", { error: String(e) });
+      });
+      void lrcP;
     } else {
-      if (song.lrc) store.loadLyrics(song);
+      // 本地歌曲：URL 还在，直接恢复播放
+      if (song.url) {
+        if (song.lrc) store.loadLyrics(song);
+        // 设置恢复进度（useAudioBinding 的 seek watch 会处理）
+        if (savedTime > 0 && savedTime < (song.duration || Infinity)) {
+          // 触发 audio.currentTime 设置
+          store.currentTime = savedTime;
+        }
+        // 本地歌曲使用 Rodio，需要重新触发播放（rodio 在程序退出时已停止）
+        // 通过设置 _restorePlaying 标记，并手动触发 rodio 重新加载
+        (song as any)._restorePlaying = true;
+        (song as any)._restoreTime = savedTime > 0 ? savedTime : 0;
+        // 强制触发 url watch：先把 url 清空再恢复（hack 但有效）
+        const savedUrl = song.url;
+        song.url = "";
+        // queue 同步
+        const idx2 = store.queue.findIndex(s => s.id === song.id);
+        if (idx2 >= 0) {
+          store.queue[idx2].url = "";
+          (store.queue[idx2] as any)._restorePlaying = true;
+          (store.queue[idx2] as any)._restoreTime = (song as any)._restoreTime;
+        }
+        // 下一 tick 恢复 url，触发 watch
+        setTimeout(() => {
+          song.url = savedUrl;
+          if (idx2 >= 0) store.queue[idx2].url = savedUrl;
+        }, 50);
+      }
     }
   }
   sessionTimer = setInterval(() => store.saveSession(), 10000);
@@ -196,6 +304,9 @@ onUnmounted(() => {
 
         <button class="icon-btn" :class="{ active: showNowPlaying }" title="全屏播放器" @click="toggleNowPlaying">
           <Icon name="expand" :size="16" />
+        </button>
+        <button class="icon-btn theme-toggle" :title="`主题：${settings.colorMode}`" @click="toggleColorMode">
+          <Icon :name="settings.colorMode === 'dark' ? 'moon' : 'sun'" :size="16" />
         </button>
         <button class="icon-btn" title="首页设置" @click="showHomeSettings = true">
           <img src="/icons/settings.svg" alt="settings" class="settings-icon" />

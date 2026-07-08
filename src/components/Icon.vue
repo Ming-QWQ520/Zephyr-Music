@@ -64,6 +64,8 @@ const ICONS: Record<string, string> = {
   check: `<path d="m5 12 5 5L20 7" stroke-linecap="round" stroke-linejoin="round"/>`,
   link: `<path d="M9 15l6-6M9 11l2-2a3 3 0 0 1 4 4l-2 2M15 13l-2 2a3 3 0 0 1-4-4l2-2" stroke-linecap="round" stroke-linejoin="round"/>`,
   wallpaper: `<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 17 4-4 3 3 3-2 6 5" stroke-linecap="round" stroke-linejoin="round"/>`,
+  sun: `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke-linecap="round"/>`,
+  moon: `<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/>`,
 };
 
 const inner = computed(() => ICONS[props.name] || "");

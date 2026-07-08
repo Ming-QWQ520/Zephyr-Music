@@ -1,6 +1,6 @@
 [package]
 name = "zephyr-music"
-version = "1.0.2"
+version = "1.0.4"
 description = "Zephyr · 现代化本地音乐播放器"
 authors = ["Zephyr"]
 edition = "2021"
@@ -8,7 +8,7 @@ rust-version = "1.77.2"
 
 [lib]
 name = "zephyr_music_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["staticlib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

@@ -656,14 +656,17 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
             </span>
             <span class="col-artist">
               <span class="artist-text truncate">{{ song.artist }}</span>
-              <!-- 喜欢按钮 + 添加到歌单按钮（hover 显示，艺术家右侧） -->
-              <div v-if="song.source === 'netease'" class="row-actions">
-                <button class="row-like-btn" :class="{ liked: songLikedSet.has(song.neteaseId!) }" :title="songLikedSet.has(song.neteaseId!) ? '取消喜欢' : '喜欢'" @click.stop="toggleSongLike(song)">
-                  <img v-if="songLikedSet.has(song.neteaseId!)" src="/icons/like.svg" alt="liked" class="row-action-icon" />
-                  <img v-else src="/icons/not_like.svg" alt="not liked" class="row-action-icon" />
+              <!-- 统一音乐卡片操作按钮：喜欢 / 添加至歌单 / 下一首播放（hover 显示，艺术家左侧） -->
+              <div v-if="song.source === 'netease'" class="nmn-row-actions" :class="{ 'has-liked': songLikedSet.has(song.neteaseId!) }">
+                <button class="nmn-action-btn row-like-btn" :class="{ liked: songLikedSet.has(song.neteaseId!) }" :title="songLikedSet.has(song.neteaseId!) ? '取消喜欢' : '喜欢'" @click.stop="toggleSongLike(song)">
+                  <img v-if="songLikedSet.has(song.neteaseId!)" src="/icons/like.svg" alt="liked" class="nmn-action-icon" />
+                  <img v-else src="/icons/not_like.svg" alt="not liked" class="nmn-action-icon" />
                 </button>
-                <button class="row-add-pl-btn" title="添加到歌单" @click.stop="openAddToPlaylistDialog(song)">
-                  <img src="/icons/add_playlist.svg" alt="add to playlist" class="row-action-icon" />
+                <button class="nmn-action-btn row-add-pl-btn" title="添加到歌单" @click.stop="openAddToPlaylistDialog(song)">
+                  <img src="/icons/add_playlist.svg" alt="add to playlist" class="nmn-action-icon" />
+                </button>
+                <button class="nmn-action-btn nmn-action-next" title="下一首播放" @click.stop="store.addToQueue(song)">
+                  <Icon name="next" :size="15" />
                 </button>
               </div>
             </span>

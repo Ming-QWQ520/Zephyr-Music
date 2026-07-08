@@ -15,6 +15,8 @@ const results = ref<Song[]>([]);
 const loading = ref(false);
 const errorMsg = ref("");
 const localOpen = ref(false);
+/** 当前列表歌曲的喜欢状态集合（neteaseId → liked） */
+const songLikedSet = ref<Set<number>>(new Set());
 /** 搜索类型：1=单曲 */
 const searchType = ref(1);
 const searchTypes = [
@@ -107,6 +109,8 @@ async function runSearch(kw: string) {
     } else {
       results.value = songs.map(neteaseSongToSong);
       log.info("searchview", "search done", { kw: trimmed, count: results.value.length, hasPic: results.value.filter(s => s.pic).length });
+      // 后台加载喜欢状态
+      loadSongLikedStatus();
       // /search 返回的 album 没有 picUrl，用 songDetail 批量补充封面
       const needCover = results.value.filter(s => !s.pic && s.neteaseId);
       if (needCover.length > 0) {
@@ -167,6 +171,44 @@ function playNext(song: Song) {
   store.playNext(song);
 }
 
+/** 加载当前列表歌曲的喜欢状态 */
+async function loadSongLikedStatus() {
+  if (results.value.length === 0) return;
+  try {
+    const likeSet = await getCachedLikeList();
+    const liked = new Set<number>();
+    for (const s of results.value) {
+      if (s.neteaseId && likeSet.has(s.neteaseId)) liked.add(s.neteaseId);
+    }
+    songLikedSet.value = liked;
+  } catch { /* ignore */ }
+}
+
+/** 切换单首歌曲喜欢状态（行内按钮） */
+async function toggleSongLike(song: Song) {
+  if (song.source !== "netease" || !song.neteaseId) return;
+  const liked = songLikedSet.value.has(song.neteaseId);
+  try {
+    await songLike(song.neteaseId, 0, !liked);  // userId=0 由后端从 cookie 推断
+    if (!liked) { songLikedSet.value.add(song.neteaseId); addLikeCache(song.neteaseId); }
+    else { songLikedSet.value.delete(song.neteaseId); removeLikeCache(song.neteaseId); }
+    // 触发响应式更新
+    songLikedSet.value = new Set(songLikedSet.value);
+    toast.success(liked ? "已取消喜欢" : "已喜欢", song.name);
+  } catch (e) {
+    log.warn("searchview", "toggle song like failed", { error: String(e) });
+    toast.error("操作失败", "请稍后重试");
+  }
+}
+
+/** 行内"添加到歌单"按钮 - 复用右键菜单的对话框 */
+function openAddToPlaylistDialogForRow(song: Song) {
+  if (song.source !== "netease") return;
+  // 复用已有的 addToPlaylistDialog（与右键菜单共用）
+  addToPlaylistDialog.value = { visible: true, song };
+  import("@/api/netease").then(m => m.getCachedPlaylists()).then(pls => { playlists.value = pls; });
+}
+
 onMounted(() => {
   if (store.searchKeyword) runSearch(store.searchKeyword);
 });
@@ -222,8 +264,8 @@ watch(
           <tr>
             <th class="col-idx">#</th>
             <th class="col-title">标题</th>
+            <th class="col-actions-inline"></th>
             <th class="col-artist">歌手</th>
-            <th class="col-actions"></th>
           </tr>
         </thead>
         <tbody>
@@ -251,16 +293,27 @@ watch(
                 <div class="mobile-artist truncate">{{ song.artist }}</div>
               </div>
             </td>
+            <!-- 统一音乐卡片操作按钮：喜欢 / 添加至歌单 / 下一首播放（=加入队列，放在标题和艺术家之间） -->
+            <td class="col-actions-inline">
+              <div class="nmn-row-actions" :class="{ 'has-liked': song.neteaseId && songLikedSet.has(song.neteaseId) }">
+                <button v-if="song.source === 'netease'" class="nmn-action-btn nmn-action-like"
+                  :class="{ liked: song.neteaseId && songLikedSet.has(song.neteaseId) }"
+                  :title="song.neteaseId && songLikedSet.has(song.neteaseId) ? '取消喜欢' : '喜欢'"
+                  @click.stop="toggleSongLike(song)">
+                  <img v-if="song.neteaseId && songLikedSet.has(song.neteaseId)" src="/icons/like.svg" alt="liked" class="nmn-action-icon" />
+                  <img v-else src="/icons/not_like.svg" alt="not liked" class="nmn-action-icon" />
+                </button>
+                <button v-if="song.source === 'netease'" class="nmn-action-btn nmn-action-playlist" title="添加到歌单"
+                  @click.stop="openAddToPlaylistDialogForRow(song)">
+                  <img src="/icons/add_playlist.svg" alt="add to playlist" class="nmn-action-icon" />
+                </button>
+                <button class="nmn-action-btn nmn-action-next" title="下一首播放" @click.stop="add(song)">
+                  <Icon name="next" :size="15" />
+                </button>
+              </div>
+            </td>
             <td class="col-artist">
               <span class="truncate">{{ song.artist }}</span>
-            </td>
-            <td class="col-actions">
-              <button class="row-action" title="下一首播放" @click="playNext(song)">
-                <Icon name="next" :size="16" />
-              </button>
-              <button class="row-action" title="加入队列" @click="add(song)">
-                <Icon name="plus" :size="16" />
-              </button>
             </td>
           </tr>
         </tbody>
@@ -444,8 +497,8 @@ watch(
 }
 .col-idx { width: 56px; text-align: center; }
 .col-title { width: auto; }
+.col-actions-inline { width: 120px; text-align: left; }
 .col-artist { width: 30%; }
-.col-actions { width: 96px; }
 .song-table tbody tr.row {
   border-radius: 8px;
   transition: background 0.12s;
