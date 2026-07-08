@@ -138,10 +138,20 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     });
   }
 
-  /** 记录到最近播放：已由 EAPI scrobble 的 startplay 步骤自动处理，不再单独调用 */
+  /** 记录到最近播放：调用 /scrobble（通过 api-enhanced 服务）
+   *  EAPI weblog + NCBL 是直连网易云的上报，但最近播放列表可能需要通过 api-enhanced 的 /scrobble 接口同步
+   *  仅在歌曲实际播放超过 10 秒后调用一次 */
   function scrobbleToRecent(info: ScrobbleInfo | null) {
-    // EAPI scrobble 的 startplay 事件已经会记录到最近播放，无需重复调用
-    // 保留函数签名以兼容已有代码，但不再执行任何操作
+    if (!info || info.scrobbledToRecent) return;
+    if (info.accumulatedTime < 10) return;
+    info.scrobbledToRecent = true;
+    const sourceid = info.sourceid || 0;
+    scrobble(info.neteaseId, sourceid, Math.floor(info.accumulatedTime)).then(() => {
+      log.info(TAG, "scrobble to recent ok (api-enhanced)", { songId: info.neteaseId, name: info.name, time: Math.floor(info.accumulatedTime) });
+    }).catch((e) => {
+      log.warn(TAG, "scrobble to recent failed", { error: String(e) });
+      info.scrobbledToRecent = false;
+    });
   }
 
   /** 初始化新歌曲的打卡信息 */

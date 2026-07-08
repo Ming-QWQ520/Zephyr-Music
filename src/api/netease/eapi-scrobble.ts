@@ -286,7 +286,7 @@ export class EapiClient {
   async eapiPost(path: string, payload: Record<string, any>): Promise<any> {
     const bodyPayload = { ...payload };
     bodyPayload["header"] = JSON.stringify({
-      os: "pc",
+      os: this.cookies["os"] || "pc",
       appver: APP_VERSION,
       deviceId: this.deviceID,
       requestId: "0",
