@@ -1,23 +1,36 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { recentListenList, neteaseSongToSong, getCookie } from "@/api/netease";
+import { recordRecentSong, neteaseSongToSong, getCookie } from "@/api/netease";
 import { log } from "@/composables/logger";
 import Icon from "@/components/Icon.vue";
-import type { Song } from "@/types";
+import type { NeteaseSong, Song } from "@/types";
 
 const store = usePlayerStore();
 
 const recentSongs = ref<Song[]>([]);
 const loading = ref(false);
 
+function pickRecentSong(item: any): NeteaseSong | null {
+  return item?.song || item?.data || item?.resource || null;
+}
+
 async function loadRecent() {
   if (!getCookie()) return;
   loading.value = true;
   try {
-    const res = await recentListenList();
-    const list = res.data || res.list || [];
-    recentSongs.value = list.map(item => neteaseSongToSong(item.song));
+    const res = await recordRecentSong(300);
+    const list = Array.isArray((res as any).data?.list)
+      ? (res as any).data.list
+      : Array.isArray((res as any).list)
+        ? (res as any).list
+        : Array.isArray((res as any).data)
+          ? (res as any).data
+          : [];
+    recentSongs.value = (list as any[])
+      .map(pickRecentSong)
+      .filter((song: NeteaseSong | null): song is NeteaseSong => !!song?.id)
+      .map((song: NeteaseSong) => neteaseSongToSong(song));
     log.info("library-view", "recent listen loaded", { count: recentSongs.value.length });
   } catch (e) {
     log.warn("library-view", "load recent failed", { error: String(e) });

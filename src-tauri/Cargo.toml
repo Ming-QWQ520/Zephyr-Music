@@ -24,6 +24,12 @@ chrono = "0.4"
 urlencoding = "2"
 rodio = "0.19"
 lofty = "0.21"
+reqwest = { version = "0.12", features = ["json", "multipart", "gzip"] }
+aes = "0.8"
+md5 = "0.7"
+rand = "0.8"
+flate2 = "1"
+num-bigint = "0.4"
 
 # This feature is enabled by `tauri build` (production). It tells the tauri
 # crate to embed the frontendDist into the binary (custom protocol) instead of

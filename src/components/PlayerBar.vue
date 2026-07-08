@@ -611,6 +611,18 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .like-btn.liked { color: var(--accent); }
 .like-btn:disabled { opacity: 0.4; }
 .like-icon { width: 18px; height: 18px; display: inline-block; flex-shrink: 0; pointer-events: none; }
+/* 浅色模式下"喜欢"按钮图标可见性：使用加强滤镜确保足够对比度 */
+.like-btn .like-icon {
+  filter: var(--themed-icon-strong-filter);
+}
+/* hover 时图标全不透明，更清晰 */
+.like-btn:hover .like-icon {
+  filter: var(--themed-icon-hover-filter);
+}
+/* 已喜欢状态：红色图标无需滤镜（like.svg 本身为红色 #d81e06） */
+.like-btn.liked .like-icon {
+  filter: none;
+}
 
 .center-block { display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 0; }
 .controls { display: flex; align-items: center; gap: 4px; }
@@ -782,6 +794,14 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .comment-btn { width: 28px; height: 28px; color: var(--text-tertiary); flex-shrink: 0; position: relative; }
 .comment-btn:hover { color: var(--accent); }
 .comment-btn.active { color: var(--accent); }
+/* 浅色模式下"评论"按钮图标可见性：使用加强滤镜确保足够对比度 */
+.comment-btn .like-icon {
+  filter: var(--themed-icon-strong-filter);
+}
+.comment-btn:hover .like-icon,
+.comment-btn.active .like-icon {
+  filter: var(--themed-icon-hover-filter);
+}
 .comment-badge {
   position: absolute; top: -4px; right: -6px;
   min-width: 16px; height: 14px; padding: 0 4px;

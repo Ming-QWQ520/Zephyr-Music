@@ -1,9 +1,11 @@
-use tauri::Manager;
+use chrono::Local;
+use lofty::file::AudioFile;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
-use chrono::Local;
-use lofty::file::AudioFile;
+use tauri::Manager;
+
+mod netease_report;
 
 struct LogFile(Mutex<Option<String>>);
 
@@ -17,7 +19,12 @@ struct AudioState {
 }
 impl AudioState {
     fn new() -> Self {
-        Self { stream: None, sink: None, volume: 0.8, is_playing: false }
+        Self {
+            stream: None,
+            sink: None,
+            volume: 0.8,
+            is_playing: false,
+        }
     }
 }
 unsafe impl Send for AudioState {}
@@ -38,33 +45,32 @@ fn wl(app: &tauri::AppHandle, msg: &str) {
 
 #[tauri::command]
 fn init_log(app: tauri::AppHandle) -> Result<String, String> {
-    let d = std::env::current_exe().map_err(|e| e.to_string())?.parent().ok_or("no dir")?.to_path_buf();
+    let d = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("no dir")?
+        .to_path_buf();
     let ld = d.join("log");
     fs::create_dir_all(&ld).map_err(|e| e.to_string())?;
     let ts = Local::now().format("%y%m%d%H%M%S").to_string();
     let lp = ld.join(format!("{}.log", ts));
     let lps = lp.to_string_lossy().to_string();
-    fs::write(&lp, format!("=== Zephyr Music Log ===\nStarted: {}\nLog file: {}\n\n", Local::now().format("%Y-%m-%d %H:%M:%S"), lps)).map_err(|e| e.to_string())?;
+    fs::write(
+        &lp,
+        format!(
+            "=== Zephyr Music Log ===\nStarted: {}\nLog file: {}\n\n",
+            Local::now().format("%Y-%m-%d %H:%M:%S"),
+            lps
+        ),
+    )
+    .map_err(|e| e.to_string())?;
     *app.state::<LogFile>().0.lock().unwrap() = Some(lps.clone());
     Ok(lps)
 }
 
 #[tauri::command]
-fn write_log(app: tauri::AppHandle, message: String) -> Result<(), String> { wl(&app, &message); Ok(()) }
-
-/// 独立的 scrobble 日志，写到 exe目录/log/scrobble/[当天日期].log
-#[tauri::command]
-fn write_scrobble_log(message: String) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let dir = exe.parent().ok_or("no dir")?;
-    let log_dir = dir.join("log").join("scrobble");
-    fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
-    let date = Local::now().format("%Y%m%d").to_string();
-    let log_path = log_dir.join(format!("{}.log", date));
-    let ts = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
-    let mut f = OpenOptions::new().create(true).append(true).open(&log_path).map_err(|e| e.to_string())?;
-    f.write_all(format!("[{}] {}\n", ts, message).as_bytes()).map_err(|e| e.to_string())?;
-    f.flush().ok();
+fn write_log(app: tauri::AppHandle, message: String) -> Result<(), String> {
+    wl(&app, &message);
     Ok(())
 }
 
@@ -74,17 +80,33 @@ fn rodio_play(app: tauri::AppHandle, path: String) -> Result<f64, String> {
     let mut st = state.lock().map_err(|e| e.to_string())?;
     let fp = if path.starts_with("localaudio://") || path.starts_with("localfile://") {
         let raw = path.split(":///").nth(1).unwrap_or(&path);
-        urlencoding::decode(raw).map(|s| s.into_owned()).unwrap_or_else(|_| raw.to_string())
-    } else { path.clone() };
+        urlencoding::decode(raw)
+            .map(|s| s.into_owned())
+            .unwrap_or_else(|_| raw.to_string())
+    } else {
+        path.clone()
+    };
     wl(&app, &format!("[rodio] opening: {}", fp));
-    let file = fs::File::open(&fp).map_err(|e| { wl(&app, &format!("[rodio] open failed: {}", e)); format!("[rodio] open failed: {}", e) })?;
+    let file = fs::File::open(&fp).map_err(|e| {
+        wl(&app, &format!("[rodio] open failed: {}", e));
+        format!("[rodio] open failed: {}", e)
+    })?;
 
-    let source = rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| { wl(&app, &format!("[rodio] decode failed: {}", e)); format!("[rodio] decode failed: {}", e) })?;
+    let source = rodio::Decoder::new(std::io::BufReader::new(file)).map_err(|e| {
+        wl(&app, &format!("[rodio] decode failed: {}", e));
+        format!("[rodio] decode failed: {}", e)
+    })?;
     wl(&app, "[rodio] decoded ok");
-    if let Some(ref sink) = st.sink { sink.stop(); }
+    if let Some(ref sink) = st.sink {
+        sink.stop();
+    }
     if st.stream.is_none() {
-        let (stream, handle) = rodio::OutputStream::try_default().map_err(|e| { wl(&app, &format!("[rodio] stream failed: {}", e)); format!("[rodio] stream failed: {}", e) })?;
-        let sink = rodio::Sink::try_new(&handle).map_err(|e| format!("[rodio] sink failed: {}", e))?;
+        let (stream, handle) = rodio::OutputStream::try_default().map_err(|e| {
+            wl(&app, &format!("[rodio] stream failed: {}", e));
+            format!("[rodio] stream failed: {}", e)
+        })?;
+        let sink =
+            rodio::Sink::try_new(&handle).map_err(|e| format!("[rodio] sink failed: {}", e))?;
         st.stream = Some(stream);
         st.sink = Some(sink);
     }
@@ -100,7 +122,10 @@ fn rodio_play(app: tauri::AppHandle, path: String) -> Result<f64, String> {
             wl(&app, &format!("[rodio] duration: {}s", d));
             d
         }
-        Err(e) => { wl(&app, &format!("[rodio] lofty failed: {}", e)); 0.0 }
+        Err(e) => {
+            wl(&app, &format!("[rodio] lofty failed: {}", e));
+            0.0
+        }
     };
     wl(&app, &format!("[rodio] playing, duration={}", dur));
     Ok(dur)
@@ -110,7 +135,9 @@ fn rodio_play(app: tauri::AppHandle, path: String) -> Result<f64, String> {
 fn rodio_pause(app: tauri::AppHandle) -> Result<(), String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let mut s = st.lock().map_err(|e| e.to_string())?;
-    if let Some(ref sink) = s.sink { sink.pause(); }
+    if let Some(ref sink) = s.sink {
+        sink.pause();
+    }
     s.is_playing = false;
     wl(&app, "[rodio] paused");
     Ok(())
@@ -120,7 +147,9 @@ fn rodio_pause(app: tauri::AppHandle) -> Result<(), String> {
 fn rodio_resume(app: tauri::AppHandle) -> Result<(), String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let mut s = st.lock().map_err(|e| e.to_string())?;
-    if let Some(ref sink) = s.sink { sink.play(); }
+    if let Some(ref sink) = s.sink {
+        sink.play();
+    }
     s.is_playing = true;
     wl(&app, "[rodio] resumed");
     Ok(())
@@ -130,18 +159,26 @@ fn rodio_resume(app: tauri::AppHandle) -> Result<(), String> {
 fn rodio_position(app: tauri::AppHandle) -> Result<f64, String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let s = st.lock().map_err(|e| e.to_string())?;
-    if let Some(ref sink) = s.sink { Ok(sink.get_pos().as_secs_f64()) } else { Ok(0.0) }
+    if let Some(ref sink) = s.sink {
+        Ok(sink.get_pos().as_secs_f64())
+    } else {
+        Ok(0.0)
+    }
 }
 
 #[tauri::command]
-fn rodio_duration(_app: tauri::AppHandle) -> Result<f64, String> { Ok(0.0) }
+fn rodio_duration(_app: tauri::AppHandle) -> Result<f64, String> {
+    Ok(0.0)
+}
 
 #[tauri::command]
 fn rodio_set_volume(app: tauri::AppHandle, volume: f32) -> Result<(), String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let mut s = st.lock().map_err(|e| e.to_string())?;
     s.volume = volume.clamp(0.0, 1.0);
-    if let Some(ref sink) = s.sink { sink.set_volume(s.volume); }
+    if let Some(ref sink) = s.sink {
+        sink.set_volume(s.volume);
+    }
     Ok(())
 }
 
@@ -150,7 +187,10 @@ fn rodio_is_playing(app: tauri::AppHandle) -> Result<bool, String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let mut s = st.lock().map_err(|e| e.to_string())?;
     if let Some(ref sink) = s.sink {
-        if sink.empty() && s.is_playing { s.is_playing = false; wl(&app, "[rodio] ended"); }
+        if sink.empty() && s.is_playing {
+            s.is_playing = false;
+            wl(&app, "[rodio] ended");
+        }
     }
     Ok(s.is_playing)
 }
@@ -159,7 +199,9 @@ fn rodio_is_playing(app: tauri::AppHandle) -> Result<bool, String> {
 fn rodio_stop(app: tauri::AppHandle) -> Result<(), String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let mut s = st.lock().map_err(|e| e.to_string())?;
-    if let Some(ref sink) = s.sink { sink.stop(); }
+    if let Some(ref sink) = s.sink {
+        sink.stop();
+    }
     s.is_playing = false;
     wl(&app, "[rodio] stopped");
     Ok(())
@@ -170,7 +212,8 @@ fn rodio_seek(app: tauri::AppHandle, position: f64) -> Result<(), String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let s = st.lock().map_err(|e| e.to_string())?;
     if let Some(ref sink) = s.sink {
-        sink.try_seek(std::time::Duration::from_secs_f64(position)).map_err(|e| format!("[rodio] seek failed: {}", e))?;
+        sink.try_seek(std::time::Duration::from_secs_f64(position))
+            .map_err(|e| format!("[rodio] seek failed: {}", e))?;
     }
     Ok(())
 }
@@ -184,14 +227,26 @@ pub fn run() {
         .manage(LogFile(Mutex::new(None)))
         .manage(Arc::new(Mutex::new(AudioState::new())))
         .invoke_handler(tauri::generate_handler![
-            init_log, write_log, write_scrobble_log,
-            rodio_play, rodio_pause, rodio_resume,
-            rodio_position, rodio_duration,
-            rodio_set_volume, rodio_is_playing, rodio_stop, rodio_seek
+            init_log,
+            write_log,
+            rodio_play,
+            rodio_pause,
+            rodio_resume,
+            rodio_position,
+            rodio_duration,
+            rodio_set_volume,
+            rodio_is_playing,
+            rodio_stop,
+            rodio_seek,
+            netease_report::netease_report_playback
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]
-            { if let Some(win) = app.get_webview_window("main") { win.open_devtools(); } }
+            {
+                if let Some(win) = app.get_webview_window("main") {
+                    win.open_devtools();
+                }
+            }
             let _ = app;
             Ok(())
         })

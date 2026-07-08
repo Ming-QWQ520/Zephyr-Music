@@ -1,7 +1,41 @@
 /** 网易云歌曲 URL / 详情 / 打卡 / 听歌记录 API */
+import { invoke } from "@tauri-apps/api/core";
 import { log } from "@/composables/logger";
-import { apiGet, TAG } from "./core";
+import { apiGet, getCookie, TAG } from "./core";
 import type { NeteaseSong } from "@/types";
+
+type LocalReportMode = "eapi" | "ncbl" | "both";
+
+interface LocalReportRequest {
+  cookie: string;
+  songId: number;
+  sourceId?: string;
+  playTime: number;
+  totalTime?: number;
+  bitrate?: number;
+  level?: string;
+  mode: LocalReportMode;
+}
+
+interface LocalReportResponse {
+  code: number;
+  message: string;
+  eapi?: any;
+  ncbl?: any;
+}
+
+async function reportPlaybackLocal(request: Omit<LocalReportRequest, "cookie">): Promise<LocalReportResponse | null> {
+  const cookie = getCookie();
+  if (!cookie) return { code: 401, message: "missing NetEase cookie" };
+  try {
+    return await invoke<LocalReportResponse>("netease_report_playback", {
+      request: { ...request, cookie },
+    });
+  } catch (e) {
+    log.warn(TAG, "local playback report unavailable", { mode: request.mode, error: String(e) });
+    return null;
+  }
+}
 
 /** 获取音乐 URL */
 export async function songUrl(id: number): Promise<{
@@ -49,7 +83,19 @@ export async function songDetail(ids: number[]): Promise<{
 export async function scrobble(id: number, sourceid: number, time?: number): Promise<{ code: number }> {
   const params: Record<string, string | number> = { id, sourceid };
   if (time !== undefined && time >= 0) params.time = time;
-  log.info(TAG, "scrobble()", { id, sourceid, time });
+  log.info(TAG, "scrobble(local eapi)", { id, sourceid, time });
+  const local = await reportPlaybackLocal({
+    mode: "eapi",
+    songId: id,
+    sourceId: sourceid > 0 ? String(sourceid) : undefined,
+    playTime: Math.max(1, Math.floor(time ?? 60)),
+  });
+  if (local) {
+    const code = local.eapi?.code ?? local.code;
+    log.info(TAG, "scrobble local result", { id, sourceid, code });
+    return { code };
+  }
+  log.info(TAG, "scrobble(remote fallback)", { id, sourceid, time });
   const r = await apiGet("/scrobble", params);
   log.info(TAG, "scrobble result", { id, sourceid, code: r.code });
   return r;
@@ -82,7 +128,22 @@ export async function scrobbleV1(
   if (options?.bitrate) params.bitrate = options.bitrate;
   if (options?.level) params.level = options.level;
   if (options?.total) params.total = options.total;
-  log.info(TAG, "scrobbleV1()", { id, time, ...options });
+  log.info(TAG, "scrobbleV1(local ncbl)", { id, time, ...options });
+  const local = await reportPlaybackLocal({
+    mode: "ncbl",
+    songId: id,
+    sourceId: options?.sourceid ? String(options.sourceid) : undefined,
+    playTime: Math.max(1, Math.floor(time)),
+    totalTime: options?.total ? Math.max(1, Math.floor(options.total)) : undefined,
+    bitrate: options?.bitrate,
+    level: options?.level,
+  });
+  if (local) {
+    const code = local.ncbl?.code ?? local.code;
+    log.info(TAG, "scrobbleV1 local result", { id, time, code });
+    return { code };
+  }
+  log.info(TAG, "scrobbleV1(remote fallback)", { id, time, ...options });
   const r = await apiGet<{ code: number }>("/scrobble/v1", params);
   log.info(TAG, "scrobbleV1 result", { id, time, code: r.code });
   return r;
@@ -91,12 +152,15 @@ export async function scrobbleV1(
 /** 获取用户播放记录（最近播放-歌曲，/record/recent/song） */
 export async function recordRecentSong(limit = 300): Promise<{
   code: number;
-  data?: { playCount: number; song: NeteaseSong }[];
+  data?: {
+    total?: number;
+    list?: { resourceId?: string; playTime?: number; data?: NeteaseSong; song?: NeteaseSong }[];
+  } | { playCount: number; song: NeteaseSong }[];
   list?: { playCount: number; song: NeteaseSong }[];
 }> {
   log.info(TAG, "recordRecentSong()", { limit });
   const r = await apiGet("/record/recent/song", { limit });
-  const records = r.data || r.list || [];
+  const records = Array.isArray(r.data) ? r.data : (r.data as any)?.list || r.list || [];
   log.info(TAG, "recordRecentSong result", {
     code: r.code, count: records.length,
     field: r.data ? "data" : r.list ? "list" : "none",

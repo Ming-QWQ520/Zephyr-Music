@@ -333,3 +333,38 @@ button[class*="play-all"]:hover,
   color: var(--text-secondary);
   margin-right: 4px;
 }
+
+/* ===== Themed icon filter — light-mode visibility fix =====
+   部分 SVG 图标内置 fill="#ffffff"（为深色背景设计），在亮色主题下与浅色
+   背景融为一体不可见。通过 CSS 变量在亮色主题下将其转为深色；播放界面
+   (np-overlay) 始终为深色背景，覆盖为 none 以保持原白色。
+   受影响图标：not_like / comment / dislike / edit / close / settings /
+   translate / add_playlist（均为 #ffffff 单色图标，通过 <img> 引用）。
+   --themed-icon-filter: 基础滤镜（匹配 text-secondary 透明度）
+   --themed-icon-strong-filter: 加强滤镜（喜欢/评论按钮专用，更高对比度）
+   --themed-icon-hover-filter: hover/active 态滤镜（纯黑全不透明） */
+:root {
+  --themed-icon-filter: brightness(0) opacity(0.62);
+  --themed-icon-strong-filter: brightness(0) opacity(0.85);
+  --themed-icon-hover-filter: brightness(0);
+}
+[data-color-mode="dark"] {
+  --themed-icon-filter: none;
+  --themed-icon-strong-filter: none;
+  --themed-icon-hover-filter: none;
+}
+.np-overlay {
+  --themed-icon-filter: none;
+  --themed-icon-strong-filter: none;
+  --themed-icon-hover-filter: none;
+}
+img[src="/icons/not_like.svg"],
+img[src="/icons/comment.svg"],
+img[src="/icons/dislike.svg"],
+img[src="/icons/edit.svg"],
+img[src="/icons/close.svg"],
+img[src="/icons/settings.svg"],
+img[src="/icons/translate.svg"],
+img[src="/icons/add_playlist.svg"] {
+  filter: var(--themed-icon-filter);
+}
