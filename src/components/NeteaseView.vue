@@ -94,7 +94,7 @@ async function selectPlaylist(pl: NeteasePlaylist) {
   playlistDynamic.value = null;
   playlistComments.value = [];
   playlistSubs.value = [];
-  commentPageNo.value = 1;
+  commentPageNo.value = 1; commentsLoaded.value = false; subscribersLoaded.value = false;
   commentCursor.value = undefined;
   commentHasMore.value = false;
   subsOffset.value = 0;
@@ -220,7 +220,7 @@ async function loadPlaylistById(id: number) {
   playlistDynamic.value = null;
   playlistComments.value = [];
   playlistSubs.value = [];
-  commentPageNo.value = 1;
+  commentPageNo.value = 1; commentsLoaded.value = false; subscribersLoaded.value = false;
   commentCursor.value = undefined;
   commentHasMore.value = false;
   subsOffset.value = 0;
@@ -267,7 +267,7 @@ const subsTotal = ref(0);
 /** 评论排序标签 */
 const SORT_LABELS: Record<1 | 2 | 3, string> = { 1: "推荐", 2: "热度", 3: "时间" };
 
-/** 后台加载歌单详情动态、评论、收藏者 */
+/** 后台加载歌单详情动态（评论和收藏者改为懒加载，切到对应标签页时才加载） */
 async function loadPlaylistExtra(id: number) {
   // 动态
   playlistDetailDynamic(id).then(res => {
@@ -281,16 +281,31 @@ async function loadPlaylistExtra(id: number) {
       };
     }
   }).catch(() => {});
-  // 评论（第一页 + 热门评论）
-  loadComments(id, true);
-  // 收藏者
-  loadSubscribers(id, true);
+  // 评论和收藏者改为懒加载——切到对应标签页时才加载
+}
+
+/** 评论是否已加载过（懒加载标记） */
+const commentsLoaded = ref(false);
+/** 收藏者是否已加载过（懒加载标记） */
+const subscribersLoaded = ref(false);
+
+/** 切换详情标签页时触发懒加载 */
+function onDetailTabChange(tab: "songs" | "comments" | "subscribers") {
+  activeDetailTab.value = tab;
+  if (tab === "comments" && !commentsLoaded.value && selectedPlaylistId.value) {
+    commentsLoaded.value = true;
+    loadComments(selectedPlaylistId.value, true);
+  }
+  if (tab === "subscribers" && !subscribersLoaded.value && selectedPlaylistId.value) {
+    subscribersLoaded.value = true;
+    loadSubscribers(selectedPlaylistId.value, true);
+  }
 }
 
 async function loadComments(id: number, reset = false) {
   if (loadingComments.value) return;
   if (reset) {
-    commentPageNo.value = 1; playlistComments.value = []; commentTotal.value = 0;
+    commentPageNo.value = 1; commentsLoaded.value = false; subscribersLoaded.value = false; playlistComments.value = []; commentTotal.value = 0;
     commentCursor.value = undefined; commentHasMore.value = false;
   }
   loadingComments.value = true;
@@ -584,11 +599,11 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
       <!-- 详情标签页（所有真实歌单都显示：歌曲/评论/收藏者） -->
       <div v-if="showDetailTabs" class="detail-tabs">
-        <button class="detail-tab" :class="{ active: activeDetailTab === 'songs' }" @click="activeDetailTab = 'songs'">歌曲</button>
-        <button class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="activeDetailTab = 'comments'">
+        <button class="detail-tab" :class="{ active: activeDetailTab === 'songs' }" @click="onDetailTabChange('songs')">歌曲</button>
+        <button class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="onDetailTabChange('comments')">
           评论<span v-if="commentTotal"> ({{ formatCount(commentTotal) }})</span>
         </button>
-        <button class="detail-tab" :class="{ active: activeDetailTab === 'subscribers' }" @click="activeDetailTab = 'subscribers'">
+        <button class="detail-tab" :class="{ active: activeDetailTab === 'subscribers' }" @click="onDetailTabChange('subscribers')">
           收藏者<span v-if="subsTotal"> ({{ formatCount(subsTotal) }})</span>
         </button>
       </div>

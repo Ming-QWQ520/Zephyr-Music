@@ -150,13 +150,13 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   }
 
   /** 记录到最近播放：调用 /scrobble（通过 api-enhanced 服务）
-   *  EAPI weblog + NCBL 是直连网易云的上报，但最近播放列表可能需要通过 api-enhanced 的 /scrobble 接口同步
    *  仅在歌曲实际播放超过 10 秒后调用一次 */
   function scrobbleToRecent(info: ScrobbleInfo | null) {
     if (!info || info.scrobbledToRecent) return;
     if (info.accumulatedTime < 10) return;
     info.scrobbledToRecent = true;
-    const sourceid = info.sourceid || 0;
+    // sourceid 默认用 songId
+    const sourceid = info.sourceid || info.neteaseId;
     scrobble(info.neteaseId, sourceid, Math.floor(info.accumulatedTime)).then(() => {
       log.info(TAG, "scrobble to recent ok (api-enhanced)", { songId: info.neteaseId, name: info.name, time: Math.floor(info.accumulatedTime) });
     }).catch((e) => {
@@ -236,11 +236,12 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     stopScrobbleTick();
     lastReportedTime = 0;
     scrobbleTickTimer = setInterval(() => {
-      if (!scrobbleInfo || !scrobbleInfo.ticking) return;
+      if (!scrobbleInfo) return;
+      // 不再依赖 ticking 状态，直接检查 store.isPlaying
+      if (!store.isPlaying) return;
       const ct = store.currentTime;
       if (ct >= 0 && isFinite(ct)) {
         // 用增量方式累计：如果 currentTime 前进了，增加差值
-        // 如果 currentTime 倒退了（seek），不减少已累计时长
         if (ct > lastReportedTime && ct - lastReportedTime < 5) {
           scrobbleInfo.accumulatedTime += (ct - lastReportedTime);
         }
