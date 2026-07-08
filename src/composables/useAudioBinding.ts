@@ -6,6 +6,8 @@ import {
   rodioSetVolume,
 } from "@/composables/rodioBridge";
 import { scrobbleV1, scrobble } from "@/api/netease";
+import { dualScrobble } from "@/api/netease/dual-scrobble";
+import { useSettings } from "@/components/SettingsPanel.vue";
 
 export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   const store = usePlayerStore();
@@ -81,7 +83,9 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     }
   }
 
-  /** 上报打卡：对当前歌曲调用 /scrobble/v1（加密版，同步播放时长到听歌排行） */
+  /** 上报打卡：双上报（EAPI scrobble + NCBL scrobble_v1）
+   *  EAPI: startplay + play → 计入听歌量/最近播放/听歌排行
+   *  NCBL: PLV + PLD → 计入云村听歌足迹/收听时长/年度报告 */
   function doScrobble(info: ScrobbleInfo | null, isAutoNext: boolean = false) {
     if (!info) return;
     // 停止计时
@@ -93,39 +97,51 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     }
     // 如果是自动切歌（播放完），上报完整时长
     const reportTime = isAutoNext ? Math.floor(info.duration || playTime) : playTime;
-    scrobbleV1(info.neteaseId, reportTime, {
-      sourceid: info.sourceid || undefined,
-      song: info.name,
+
+    // 获取音质设置
+    let level = "exhigh";
+    let bitrate = 320;
+    try {
+      const { settings } = useSettings();
+      level = (settings as any).audioLevel || "exhigh";
+      // 根据音质映射码率
+      const bitrateMap: Record<string, number> = {
+        standard: 128, higher: 192, exhigh: 320, lossless: 999,
+        hires: 1999, jyeffect: 999, sky: 999, dolby: 1999, jymaster: 1999,
+      };
+      bitrate = bitrateMap[level] || 320;
+    } catch { /* ignore */ }
+
+    // 调用双上报（EAPI + NCBL）
+    dualScrobble({
+      songId: info.neteaseId,
+      songName: info.name,
       artist: info.artist,
-      total: info.duration,
-    }).then(() => {
-      log.info(TAG, "scrobble v1 ok", {
+      sourceId: info.sourceid,
+      playTime: reportTime,
+      totalTime: info.duration,
+      bitrate,
+      level,
+    }).then((result) => {
+      log.info(TAG, "dual scrobble done", {
         songId: info.neteaseId,
         playTime: reportTime,
         accumulated: playTime,
         total: info.duration,
         isAutoNext,
         song: info.name,
+        eapi: result.eapi?.code,
+        ncbl: result.ncbl?.code,
       });
     }).catch((e) => {
-      log.warn(TAG, "scrobble v1 failed", { error: String(e) });
+      log.warn(TAG, "dual scrobble error", { error: String(e) });
     });
   }
 
-  /** 记录到最近播放：调用 /scrobble（非加密版，同步到最近播放列表）
-   *  仅在歌曲实际播放超过一定时长（如 10 秒）后调用一次，避免重复 */
+  /** 记录到最近播放：已由 EAPI scrobble 的 startplay 步骤自动处理，不再单独调用 */
   function scrobbleToRecent(info: ScrobbleInfo | null) {
-    if (!info || info.scrobbledToRecent) return;
-    if (info.accumulatedTime < 10) return; // 播放不足 10 秒不记录到最近播放
-    info.scrobbledToRecent = true;
-    const sourceid = info.sourceid || 0;
-    scrobble(info.neteaseId, sourceid, Math.floor(info.accumulatedTime)).then(() => {
-      log.info(TAG, "scrobble to recent ok", { songId: info.neteaseId, name: info.name, time: Math.floor(info.accumulatedTime) });
-    }).catch((e) => {
-      log.warn(TAG, "scrobble to recent failed", { error: String(e) });
-      // 失败了允许重试
-      info.scrobbledToRecent = false;
-    });
+    // EAPI scrobble 的 startplay 事件已经会记录到最近播放，无需重复调用
+    // 保留函数签名以兼容已有代码，但不再执行任何操作
   }
 
   /** 初始化新歌曲的打卡信息 */
