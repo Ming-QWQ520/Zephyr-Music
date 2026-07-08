@@ -11,6 +11,7 @@
 
 import { log } from "@/composables/logger";
 import { scrobbleLog } from "./scrobble-log";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 const TAG = "ncbl-scrobble";
 const CLIENT_LOG_HOST = "https://clientlog3.music.163.com";
@@ -378,7 +379,7 @@ async function ncblUpload(ctx: NcblContext, metaJSON: Uint8Array, body: Uint8Arr
   log.info(TAG, "NCBL upload", { fileName, payloadLen: payload.length });
   await scrobbleLog(`[NCBL] upload fileName=${fileName} payloadLen=${payload.length}`);
 
-  const resp = await fetch(CLIENT_LOG_HOST + UPLOAD_PATH, {
+  const resp = await tauriFetch(CLIENT_LOG_HOST + UPLOAD_PATH, {
     method: "POST",
     headers: {
       "Content-Type": `multipart/form-data; boundary=${boundary}`,
@@ -388,7 +389,7 @@ async function ncblUpload(ctx: NcblContext, metaJSON: Uint8Array, body: Uint8Arr
       "Accept-Language": "zh-CN,zh;q=0.8",
       "Cookie": cookieStr,
     },
-    body: formData as unknown as BodyInit,
+    body: formData.buffer.slice(formData.byteOffset, formData.byteOffset + formData.byteLength) as unknown as BodyInit,
   });
 
   const text = await resp.text();

@@ -12,6 +12,7 @@
 
 import { log } from "@/composables/logger";
 import { scrobbleLog } from "./scrobble-log";
+import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 
 const TAG = "eapi-scrobble";
 const DOMAIN = "https://music.163.com";
@@ -299,7 +300,7 @@ export class EapiClient {
     log.info(TAG, "EAPI POST", { url, path });
     await scrobbleLog(`[EAPI] POST ${url}`);
 
-    const resp = await fetch(url, {
+    const resp = await tauriFetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
