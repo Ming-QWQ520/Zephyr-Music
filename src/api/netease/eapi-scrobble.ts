@@ -11,6 +11,7 @@
  */
 
 import { log } from "@/composables/logger";
+import { scrobbleLog } from "./scrobble-log";
 
 const TAG = "eapi-scrobble";
 const DOMAIN = "https://music.163.com";
@@ -296,6 +297,7 @@ export class EapiClient {
     const formData = `params=${encodeURIComponent(params)}`;
 
     log.info(TAG, "EAPI POST", { url, path });
+    await scrobbleLog(`[EAPI] POST ${url}`);
 
     const resp = await fetch(url, {
       method: "POST",
@@ -315,6 +317,7 @@ export class EapiClient {
     try { out = JSON.parse(text); } catch { out = { raw: text }; }
     out.http_status = resp.status;
     log.info(TAG, "EAPI response", { path, status: resp.status, code: out.code });
+    await scrobbleLog(`[EAPI] response status=${resp.status} code=${out.code}`, { body: text.slice(0, 500) });
     return out;
   }
 
@@ -326,6 +329,8 @@ export class EapiClient {
   async scrobble(songID: string, sourceID: string, playTime: number): Promise<any> {
     if (!sourceID) sourceID = songID;
     if (playTime <= 0) playTime = 60;
+
+    await scrobbleLog(`[EAPI] === scrobble 开始 === songId=${songID} sourceId=${sourceID} time=${playTime}s`);
 
     // scrobble 模块强制 os=osx
     this.cookies["os"] = "osx";
@@ -340,6 +345,7 @@ export class EapiClient {
     }];
     const res1 = await this.feedbackWeblog(startplayLogs);
     log.info(TAG, "startplay result", { code: res1.code });
+    await scrobbleLog(`[EAPI] startplay 完成 code=${res1.code} http=${res1.http_status}`);
 
     // 2. play
     const playLogs = [{
@@ -352,7 +358,9 @@ export class EapiClient {
     }];
     const res2 = await this.feedbackWeblog(playLogs);
     log.info(TAG, "play result", { code: res2.code });
+    await scrobbleLog(`[EAPI] play 完成 code=${res2.code} http=${res2.http_status}`);
 
+    await scrobbleLog(`[EAPI] === scrobble 结束 ===`);
     return {
       code: 200,
       message: "scrobble 上报成功",

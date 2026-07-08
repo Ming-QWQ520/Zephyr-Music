@@ -10,6 +10,7 @@
  */
 
 import { log } from "@/composables/logger";
+import { scrobbleLog } from "./scrobble-log";
 
 const TAG = "ncbl-scrobble";
 const CLIENT_LOG_HOST = "https://clientlog3.music.163.com";
@@ -375,6 +376,7 @@ async function ncblUpload(ctx: NcblContext, metaJSON: Uint8Array, body: Uint8Arr
   const formData = concatBytes(before, payload, after);
 
   log.info(TAG, "NCBL upload", { fileName, payloadLen: payload.length });
+  await scrobbleLog(`[NCBL] upload fileName=${fileName} payloadLen=${payload.length}`);
 
   const resp = await fetch(CLIENT_LOG_HOST + UPLOAD_PATH, {
     method: "POST",
@@ -398,6 +400,7 @@ async function ncblUpload(ctx: NcblContext, metaJSON: Uint8Array, body: Uint8Arr
     respBody.data?.successfiles?.includes(fileName);
 
   log.info(TAG, "NCBL response", { fileName, status: resp.status, code: respBody.code, success });
+  await scrobbleLog(`[NCBL] response fileName=${fileName} http=${resp.status} code=${respBody.code} success=${success}`, { body: text.slice(0, 500) });
   return { success, fileName, payloadLen: payload.length, respBody };
 }
 
@@ -410,32 +413,44 @@ export async function ncblScrobbleV1(
   playTime: number
 ): Promise<{ code: number; message: string; plv?: any; pld?: any }> {
   if (!ctx.auth.token) {
+    await scrobbleLog(`[NCBL] 错误: 缺少 MUSIC_U 鉴权令牌`);
     return { code: 401, message: "缺少 MUSIC_U 鉴权令牌" };
   }
   if (playTime <= 0) playTime = 60;
   let played = playTime;
   if (song.time > 0 && played > song.time) played = song.time;
 
+  await scrobbleLog(`[NCBL] === scrobbleV1 开始 === songId=${song.id} name="${song.name}" time=${played}s total=${song.time}s`);
+
   const metaJSON = buildMetaJSON(ctx);
   const cookieStr = buildCookieStr(ctx);
   const ts = Math.floor(Date.now() / 1000);
 
+  await scrobbleLog(`[NCBL] cookie 长度=${cookieStr.length} token长度=${ctx.auth.token.length} csrf=${ctx.device.csrf ? "有" : "无"} NMTID=${ctx.device.ti ? "有" : "无"}`);
+
   // 1. 上传 PLV
   const plvRecord = buildPlv(ctx, song, source);
   const plvBody = buildRecords([{ time: ts, action: "_plv", data: plvRecord }]);
+  await scrobbleLog(`[NCBL] PLV body 长度=${plvBody.length}`);
   const plvResult = await ncblUpload(ctx, metaJSON, plvBody, cookieStr);
   if (!plvResult.success) {
+    await scrobbleLog(`[NCBL] ❌ PLV 失败`);
     return { code: 500, message: "PLV 上报失败", plv: plvResult };
   }
+  await scrobbleLog(`[NCBL] ✅ PLV 成功`);
 
   // 2. 上传 PLD
   const pldRecord = buildPld(ctx, song, source, played);
   const pldBody = buildRecords([{ time: ts, action: "_pld", data: pldRecord }]);
+  await scrobbleLog(`[NCBL] PLD body 长度=${pldBody.length}`);
   const pldResult = await ncblUpload(ctx, metaJSON, pldBody, cookieStr);
   if (!pldResult.success) {
+    await scrobbleLog(`[NCBL] ❌ PLD 失败 (PLV 已成功)`);
     return { code: 500, message: "PLV 成功但 PLD 失败", plv: plvResult, pld: pldResult };
   }
+  await scrobbleLog(`[NCBL] ✅ PLD 成功`);
 
+  await scrobbleLog(`[NCBL] === scrobbleV1 结束 === 全部成功`);
   return { code: 200, message: "scrobble_v1 上报成功", plv: plvResult, pld: pldResult };
 }
 

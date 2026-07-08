@@ -52,6 +52,22 @@ fn init_log(app: tauri::AppHandle) -> Result<String, String> {
 #[tauri::command]
 fn write_log(app: tauri::AppHandle, message: String) -> Result<(), String> { wl(&app, &message); Ok(()) }
 
+/// 独立的 scrobble 日志，写到 exe目录/log/scrobble/[当天日期].log
+#[tauri::command]
+fn write_scrobble_log(message: String) -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("no dir")?;
+    let log_dir = dir.join("log").join("scrobble");
+    fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+    let date = Local::now().format("%Y%m%d").to_string();
+    let log_path = log_dir.join(format!("{}.log", date));
+    let ts = Local::now().format("%Y-%m-%d %H:%M:%S%.3f").to_string();
+    let mut f = OpenOptions::new().create(true).append(true).open(&log_path).map_err(|e| e.to_string())?;
+    f.write_all(format!("[{}] {}\n", ts, message).as_bytes()).map_err(|e| e.to_string())?;
+    f.flush().ok();
+    Ok(())
+}
+
 #[tauri::command]
 fn rodio_play(app: tauri::AppHandle, path: String) -> Result<f64, String> {
     let state = app.state::<Arc<Mutex<AudioState>>>();
@@ -168,7 +184,7 @@ pub fn run() {
         .manage(LogFile(Mutex::new(None)))
         .manage(Arc::new(Mutex::new(AudioState::new())))
         .invoke_handler(tauri::generate_handler![
-            init_log, write_log,
+            init_log, write_log, write_scrobble_log,
             rodio_play, rodio_pause, rodio_resume,
             rodio_position, rodio_duration,
             rodio_set_volume, rodio_is_playing, rodio_stop, rodio_seek
