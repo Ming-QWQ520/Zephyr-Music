@@ -115,7 +115,8 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     log.info(TAG, "doScrobble 开始", { songId: info.neteaseId, name: info.name, playTime, reportTime, isAutoNext, accumulatedTime: info.accumulatedTime, sourceid: info.sourceid });
 
     // 1. 调用 api-enhanced /scrobble（最近播放列表同步）
-    const sourceid = info.sourceid || 0;
+    // sourceid 默认用 songId（Go SDK 行为：sourceID 为空时用 songID）
+    const sourceid = info.sourceid || info.neteaseId;
     scrobble(info.neteaseId, sourceid, reportTime).then(() => {
       log.info(TAG, "scrobble (api-enhanced) ok", { songId: info.neteaseId, name: info.name, time: reportTime });
     }).catch((e) => {
@@ -127,7 +128,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       songId: info.neteaseId,
       songName: info.name,
       artist: info.artist,
-      sourceId: info.sourceid,
+      sourceId: info.sourceid || info.neteaseId,
       playTime: reportTime,
       totalTime: info.duration,
       bitrate,
