@@ -64,13 +64,6 @@
 - **开启**：白色高亮背景（22% 白色），图标固定白色
 - 图标颜色始终固定白色
 
-### 🔒 快捷键屏蔽
-全面屏蔽 WebView 浏览器快捷键（capture 阶段拦截）：
-- F5 / Ctrl+R（刷新）、F11（全屏）、Ctrl+F（查找）、Ctrl+S（保存）、Ctrl+P（打印）
-- Ctrl+W/N/T/L/U/H/J/D/O、Ctrl+/-/0（缩放）、F3/F7/F12（开发者工具）
-- Alt+←/→（后退/前进）、Ctrl+Shift+I/J/C、Ctrl+Tab
-- **Ctrl+C 保留**（歌词选择模式需要复制）
-
 ### 播放
 - **本地播放**：通过 Rust Rodio 后端播放本地音频文件（mp3/flac/wav/ogg/m4a/aac/opus）
 - **在线播放**：网易云歌曲动态获取播放 URL
@@ -305,7 +298,6 @@ cargo build --release --target x86_64-pc-windows-gnu --features custom-protocol
 - `Esc`：关闭全屏/设置/队列/歌词选择模式
 - `Ctrl+→` / `Ctrl+←`：下一首/上一首
 - `Ctrl+C`：复制（歌词选择模式下可用）
-- 其他浏览器快捷键（F5/Ctrl+R/F11/Ctrl+F 等）均已屏蔽
 
 ---
 
