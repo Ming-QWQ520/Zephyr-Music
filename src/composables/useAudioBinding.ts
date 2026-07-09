@@ -404,11 +404,20 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     store.next();
   };
 
+  /** Rodio 播放完毕处理（polling 检测到 !playing 时调用） */
+  function onRodioEnded() {
+    if (scrobbleInfo) {
+      doScrobble(scrobbleInfo, true); // true = 自动切歌（播放完）
+      scrobbleDone = true;
+    }
+    store.next();
+  }
+
   function startPolling() {
     stopPolling();
     pollTimer = setInterval(async () => {
       const playing = await import("@tauri-apps/api/core").then(m => m.invoke<boolean>("rodio_is_playing")).catch(() => false);
-      if (!playing) { stopPolling(); store.next(); return; }
+      if (!playing) { stopPolling(); onRodioEnded(); return; }
       const pos = await import("@tauri-apps/api/core").then(m => m.invoke<number>("rodio_position")).catch(() => 0);
       store.setTime(pos); store.updateActiveLyric();
     }, 300);
