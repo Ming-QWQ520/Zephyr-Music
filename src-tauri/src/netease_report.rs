@@ -419,9 +419,10 @@ async fn ncbl_scrobble_v1(
     // PLD 时间戳 = PLV 时间戳 + 实际播放时长（模拟播放过程）
     let pld_ts = plv_ts + played as i64;
 
-    // 等待至少 2 秒再上传 PLD，模拟真实播放间隔
-    // Go SDK 中 PLV 和 PLD 之间有 sleep(played * 1000)，这里至少等 2 秒
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    // 等待至少 30 秒再上传 PLD（网易云要求至少播放 30 秒才统计听歌时长）
+    // 如果 played < 30，等待 played 秒（完整播放）
+    let wait_secs = if played >= 30 { 30 } else { played };
+    std::thread::sleep(std::time::Duration::from_secs(wait_secs as u64));
 
     let pld = build_pld(ctx, song, source, played, is_auto_next);
     let pld_body = build_ncbl_records(&[(pld_ts, "_pld", pld)]);
