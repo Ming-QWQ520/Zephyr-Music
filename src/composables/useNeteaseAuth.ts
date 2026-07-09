@@ -14,7 +14,9 @@ import { useNeteaseUser } from "./useNeteaseUser";
 
 export function useNeteaseAuth() {
   const neLoggedIn = ref(false);
-  const neUser = ref<{ nickname: string; avatarUrl: string } | null>(null);
+  // neUser 直接引用 _cachedUser，这样 userDetail 合并的 signature/gender/city 等字段
+  // 会自动反映到 App.vue 的用户卡片中。
+  const neUser = _cachedUser;
   const showLoginDropdown = ref(false);
 
   // 二维码登录
@@ -41,7 +43,7 @@ export function useNeteaseAuth() {
     const user = await getCachedUser();
     if (user) {
       neLoggedIn.value = true;
-      neUser.value = { nickname: user.nickname, avatarUrl: user.avatarUrl };
+      // neUser 即 _cachedUser，getCachedUser 已设置，无需再赋值
       loadVipAndListenData();
     }
   }

@@ -52,6 +52,18 @@ export interface NeteaseUser {
   userId: number;
   nickname: string;
   avatarUrl: string;
+  /** 个性签名 */
+  signature?: string;
+  /** 账号创建时间戳（ms） */
+  createTime?: number;
+  /** 性别：0=保密, 1=男, 2=女 */
+  gender?: number;
+  /** 所在城市（行政区划代码，如 110100） */
+  city?: number;
+  /** 省份（行政区划代码） */
+  province?: number;
+  /** 个人主页背景图直链 */
+  backgroundUrl?: string;
 }
 
 /** VIP 信息 */
@@ -59,6 +71,10 @@ export interface VipInfo {
   isVip: boolean;
   redVipLevel: number;
   expireText: string;
+  /** 黑胶 VIP 动画图（webp/gif），每次进入个人主页播放一次 */
+  dynamicIconUrl?: string;
+  /** 黑胶 VIP 常规图标（动画图加载失败时回退） */
+  iconUrl?: string;
 }
 
 /** 用户等级信息 */

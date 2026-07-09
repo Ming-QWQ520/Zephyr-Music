@@ -402,11 +402,15 @@ async fn ncbl_scrobble_v1(
     let meta = build_ncbl_meta_json(ctx);
     let cookie = build_ncbl_cookie(ctx);
 
-    // PLV 时间戳 = 当前时间（播放开始时间）
-    let plv_ts = chrono::Local::now().timestamp();
+    // PLV / PLD 时间戳：均使用当前时间（对齐 api-enhanced 参考实现）
+    // 网易云通过 PLD 的 time/realtime 字段值（= played 秒数）判定听歌时长，
+    // 不依赖 PLV 与 PLD 之间的真实时间差。played >= 30 由前端 accumulatedTime 保证。
+    // 旧实现 sleep 30 秒 + pld_ts = plv_ts + played 是误判，反而可能触发风控，
+    // 且阻塞过运行时。这里改为与 api-enhanced 一致：同时间戳、连续上传。
+    let ts = chrono::Local::now().timestamp();
 
     let plv = build_plv(ctx, song, source);
-    let plv_body = build_ncbl_records(&[(plv_ts, "_plv", plv)]);
+    let plv_body = build_ncbl_records(&[(ts, "_plv", plv)]);
     let plv_result = ncbl_upload(ctx, &meta, &plv_body, &cookie).await?;
     if !plv_result
         .get("success")
@@ -416,16 +420,12 @@ async fn ncbl_scrobble_v1(
         return Ok(json!({ "code": 500, "message": "PLV report failed", "plv": plv_result }));
     }
 
-    // PLD 时间戳 = PLV 时间戳 + 实际播放时长（模拟播放过程）
-    let pld_ts = plv_ts + played as i64;
-
-    // 等待至少 30 秒再上传 PLD（网易云要求至少播放 30 秒才统计听歌时长）
-    // 如果 played < 30，等待 played 秒（完整播放）
-    let wait_secs = if played >= 30 { 30 } else { played };
-    std::thread::sleep(std::time::Duration::from_secs(wait_secs as u64));
+    // 短暂等待 2 秒模拟真实客户端的 PLV→PLD 间隔（避免完全瞬时触发风控），
+    // 但不再等待 30 秒——网易云判定时长靠 PLD 的 time 字段，不靠上传间隔。
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
     let pld = build_pld(ctx, song, source, played, is_auto_next);
-    let pld_body = build_ncbl_records(&[(pld_ts, "_pld", pld)]);
+    let pld_body = build_ncbl_records(&[(ts, "_pld", pld)]);
     let pld_result = ncbl_upload(ctx, &meta, &pld_body, &cookie).await?;
     if !pld_result
         .get("success")
@@ -484,7 +484,7 @@ fn build_plv(ctx: &NcblContext, song: &NcblSong, source: &NcblSource) -> Value {
     })
 }
 
-fn build_pld(ctx: &NcblContext, song: &NcblSong, source: &NcblSource, played: u32, is_auto_next: bool) -> Value {
+fn build_pld(ctx: &NcblContext, song: &NcblSong, source: &NcblSource, played: u32, _is_auto_next: bool) -> Value {
     let now = chrono::Local::now().timestamp_millis();
     let add_refer = format!(
         "[F:63][{now}#616#{}#{}#c9156c3][e][2][92][btn_pc_cover_play|cell_pc_songlist_song:6|page_pc_songlist_songflow|page_mine_like_music][:::|{}:song:x:x|:::|{}:list::]",
@@ -524,7 +524,10 @@ fn build_pld(ctx: &NcblContext, song: &NcblSong, source: &NcblSource, played: u3
         "rightSource": 0,
         "sourceId": source.id,
         "sourcetype": source.source_type,
-        "end": if is_auto_next { "playend" } else { "interrupt" },
+        // end 字段固定 "interrupt"（对齐 api-enhanced 参考实现）。
+        // 旧实现根据 is_auto_next 切换 playend/interrupt，但 playend 可能触发网易云
+        // 更严格的 time≈resource_time 校验；interrupt 更宽松，api-enhanced 生产验证可行。
+        "end": "interrupt",
         "libra_abt": "",
         "channel": ctx.channel,
         "curStartChannel": ""

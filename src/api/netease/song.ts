@@ -1,42 +1,7 @@
 /** 网易云歌曲 URL / 详情 / 打卡 / 听歌记录 API */
-import { invoke } from "@tauri-apps/api/core";
 import { log } from "@/composables/logger";
-import { apiGet, getCookie, TAG } from "./core";
+import { apiGet, TAG } from "./core";
 import type { NeteaseSong } from "@/types";
-
-type LocalReportMode = "eapi" | "ncbl" | "both";
-
-interface LocalReportRequest {
-  cookie: string;
-  songId: number;
-  sourceId?: string;
-  playTime: number;
-  totalTime?: number;
-  bitrate?: number;
-  level?: string;
-  mode: LocalReportMode;
-  isAutoNext?: boolean;
-}
-
-interface LocalReportResponse {
-  code: number;
-  message: string;
-  eapi?: any;
-  ncbl?: any;
-}
-
-async function reportPlaybackLocal(request: Omit<LocalReportRequest, "cookie">): Promise<LocalReportResponse | null> {
-  const cookie = getCookie();
-  if (!cookie) return { code: 401, message: "missing NetEase cookie" };
-  try {
-    return await invoke<LocalReportResponse>("netease_report_playback", {
-      request: { ...request, cookie },
-    });
-  } catch (e) {
-    log.warn(TAG, "local playback report unavailable", { mode: request.mode, error: String(e) });
-    return null;
-  }
-}
 
 /** 获取音乐 URL */
 export async function songUrl(id: number): Promise<{
@@ -95,6 +60,11 @@ export async function scrobble(id: number, sourceid: number, time?: number): Pro
  *  sourceid: 来源列表 ID，sourceName: 来源名称（默认 list）
  *  song: 歌曲名，artist: 艺术家，bitrate: 码率（默认 320），level: 音质（默认 exhigh）
  *  total: 歌曲总时长（秒）
+ *
+ *  ★ 始终使用远程 api-enhanced /scrobble/v1（Node.js NCBL 参考实现），
+ *    不再调用本地 Rust netease_report_playback。
+ *    原因：Rust NCBL 加密重实现可能有细微差异，导致网易云接受上传(code:200)
+ *    但不计入听歌时长。Node.js 实现是 api-enhanced 官方参考实现，更可靠。
  */
 export async function scrobbleV1(
   id: number,
@@ -118,23 +88,7 @@ export async function scrobbleV1(
   if (options?.bitrate) params.bitrate = options.bitrate;
   if (options?.level) params.level = options.level;
   if (options?.total) params.total = options.total;
-  log.info(TAG, "scrobbleV1(local ncbl)", { id, time, ...options });
-  const local = await reportPlaybackLocal({
-    mode: "ncbl",
-    songId: id,
-    sourceId: options?.sourceid ? String(options.sourceid) : undefined,
-    playTime: Math.max(1, Math.floor(time)),
-    totalTime: options?.total ? Math.max(1, Math.floor(options.total)) : undefined,
-    bitrate: options?.bitrate,
-    level: options?.level,
-    isAutoNext: options?.isAutoNext,
-  });
-  if (local) {
-    const code = local.ncbl?.code ?? local.code;
-    log.info(TAG, "scrobbleV1 local result", { id, time, code });
-    return { code };
-  }
-  log.info(TAG, "scrobbleV1(remote fallback)", { id, time, ...options });
+  log.info(TAG, "scrobbleV1(remote ncbl)", { id, time, ...options });
   const r = await apiGet<{ code: number }>("/scrobble/v1", params);
   log.info(TAG, "scrobbleV1 result", { id, time, code: r.code });
   return r;

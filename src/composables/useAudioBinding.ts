@@ -5,7 +5,7 @@ import {
   isLocalFile, rodioPlay, rodioPause, rodioResume, rodioStop,
   rodioSetVolume,
 } from "@/composables/rodioBridge";
-import { scrobble } from "@/api/netease";
+import { scrobble, scrobbleV1 } from "@/api/netease";
 
 export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   const store = usePlayerStore();
@@ -17,7 +17,14 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   let recentScrobbleTimer: ReturnType<typeof setTimeout> | null = null;
   let scrobbleDone = false; // onEnded 上报后设为 true，避免 watch(currentSong) 重复上报
 
-  // ===== 听歌打卡（仅加密版 /scrobble/v1）=====
+  // ===== 听歌打卡（最近播放 + 听歌排行）+ 听歌时长上报 =====
+  // 职责分离（两套独立的网易云后端系统，分别由不同函数在不同时机触发）：
+  // - scrobbleToRecent() → /scrobble（非加密 eapi）: startplay→最近播放 + play→听歌排行计数
+  //   时机: 新歌开始播放后 ~2.5s（scheduleRecentScrobble）或 scrobbleTickTimer 每秒兜底
+  //   效果: 新歌立即出现在「最近播放」列表（无需等播放完）
+  // - doScrobble()       → scrobbleV1 本地 NCBL clientlog（PLV/PLD）→ 网易云「听歌足迹」实际听歌时长
+  //   时机: 切歌/播放完毕时，对上一首歌上报其实际播放秒数
+  //   效果: 听歌时长被记录
   // 精确跟踪每首歌的实际播放时长，应对所有场景：
   // - 手动切歌：上报已播放时长
   // - 播放完自动切歌：上报完整时长（duration）
@@ -84,10 +91,10 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     }
   }
 
-  /** 上报打卡：使用 /scrobble 接口上报歌曲播放进度
+  /** 上报听歌时长：对当前/上一首歌调用 scrobbleV1（NCBL clientlog PLV/PLD）
+   *  仅负责「听歌时长」上报，不负责最近播放。
    *  isAutoNext=true: 完整播放完，上报完整时长（duration）
-   *  isAutoNext=false: 手动切歌，上报实际播放时长（accumulatedTime）
-   *  sourceid: 从 store.sourcePlaylistId 获取，如果没有用 songId */
+   *  isAutoNext=false: 手动切歌，上报实际播放时长（accumulatedTime） */
   function doScrobble(info: ScrobbleInfo | null, isAutoNext: boolean = false) {
     if (!info) return;
     // 停止计时
@@ -98,23 +105,52 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       log.info(TAG, "scrobble skipped (reportTime=0)", { songId: info.neteaseId, name: info.name, isAutoNext, playTime, duration: info.duration });
       return;
     }
-    // sourceid: 优先用歌单ID，没有就用歌曲ID
-    const sourceid = info.sourceid || info.neteaseId;
-    log.info(TAG, "doScrobble", { songId: info.neteaseId, name: info.name, isAutoNext, reportTime, sourceid, duration: info.duration, accumulatedTime: info.accumulatedTime });
-    scrobble(info.neteaseId, sourceid, reportTime).then(() => {
-      log.info(TAG, "scrobble ok", { songId: info.neteaseId, name: info.name, time: reportTime, isAutoNext });
+    log.info(TAG, "doScrobble (duration)", { songId: info.neteaseId, name: info.name, isAutoNext, reportTime, duration: info.duration, accumulatedTime: info.accumulatedTime });
+    // 听歌时长上报：NCBL 加密 clientlog（PLV/PLD）→ 网易云听歌足迹时长
+    // 最近播放的 startplay 由 scrobbleToRecent 在新歌开始时单独触发，职责分离。
+    scrobbleV1(info.neteaseId, reportTime, {
+      sourceid: info.sourceid ?? undefined,
+      song: info.name,
+      artist: info.artist,
+      total: info.duration || undefined,
+      isAutoNext,
+    }).then(() => {
+      log.info(TAG, "scrobbleV1 (duration) ok", { songId: info.neteaseId, name: info.name, time: reportTime, isAutoNext });
     }).catch((e) => {
-      log.warn(TAG, "scrobble failed", { error: String(e) });
+      log.warn(TAG, "scrobbleV1 (duration) failed", { error: String(e) });
     });
   }
 
-  /** scrobbleToRecent 已合并到 doScrobble，不再单独调用 */
-  function scrobbleToRecent(_info: ScrobbleInfo | null) {
-    // doScrobble 已经在切歌/播放完时调用 /scrobble，无需重复
+  /** 记录到最近播放：对新歌调用 /scrobble（startplay→最近播放 + play→听歌排行计数）
+   *  在新歌开始播放后尽快调用一次（由 scheduleRecentScrobble / scrobbleTickTimer 触发），
+   *  使新歌立即出现在「最近播放」列表，无需等播放完毕。
+   *  通过 scrobbledToRecent 标记保证每首歌只调用一次。 */
+  function scrobbleToRecent(info: ScrobbleInfo | null) {
+    if (!info || info.scrobbledToRecent) return;
+    if (info.accumulatedTime < 1) return; // 播放开始后尽快同步到网易云最近播放
+    info.scrobbledToRecent = true;
+    const sourceid = info.sourceid || info.neteaseId;
+    const reportTime = Math.max(1, Math.floor(info.accumulatedTime));
+    log.info(TAG, "scrobbleToRecent (startplay)", { songId: info.neteaseId, name: info.name, time: reportTime, sourceid });
+    scrobble(info.neteaseId, sourceid, reportTime).then(() => {
+      log.info(TAG, "scrobble to recent ok", { songId: info.neteaseId, name: info.name, time: reportTime });
+    }).catch((e) => {
+      log.warn(TAG, "scrobble to recent failed", { error: String(e) });
+      // 失败了允许重试
+      info.scrobbledToRecent = false;
+    });
   }
 
-  function scheduleRecentScrobble(_info: ScrobbleInfo | null) {
-    // 已合并到 doScrobble
+  function scheduleRecentScrobble(info: ScrobbleInfo | null) {
+    if (!info || info.scrobbledToRecent || recentScrobbleTimer) return;
+    // 新歌开始 ticking 后延迟 2.5 秒触发 scrobbleToRecent，
+    // 让 accumulatedTime 累积到 >=1 秒后再上报，确保 startplay 生效。
+    recentScrobbleTimer = setTimeout(() => {
+      recentScrobbleTimer = null;
+      if (!scrobbleInfo || scrobbleInfo.neteaseId !== info.neteaseId || !scrobbleInfo.ticking) return;
+      scrobbleInfo.accumulatedTime = Math.max(scrobbleInfo.accumulatedTime, store.currentTime || 1);
+      scrobbleToRecent(scrobbleInfo);
+    }, 2500);
   }
 
   function clearRecentScrobbleTimer() {

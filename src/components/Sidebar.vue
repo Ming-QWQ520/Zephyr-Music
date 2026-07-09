@@ -7,6 +7,9 @@ import { getCachedPlaylists, _cachedUser, type NeteasePlaylist } from "@/api/net
 
 const store = usePlayerStore();
 
+// user 图标不在 Icon.vue 的 ICONS 中，使用内联 SVG（24x24 viewBox / stroke 1.8 / currentColor，与 Icon.vue 风格一致）
+const SVG_USER = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>`;
+
 const recommendItems: { key: ViewKey; label: string; icon: string }[] = [
   { key: "recommend", label: "推荐", icon: "sparkles" },
 ];
@@ -79,6 +82,10 @@ watch(() => _cachedUser.value, (user) => {
     <!-- 我的 -->
     <div class="sb-section">
       <div class="sb-section-title">我的</div>
+      <button class="sb-item" :class="{ active: store.currentView === 'profile' }" @click="selectView('profile')">
+        <span class="sb-item-icon" v-html="SVG_USER" />
+        <span>个人主页</span>
+      </button>
       <button v-if="favPlaylist" class="sb-item" :class="{ active: activeItem === 'fav' }" @click="openFav">
         <Icon name="heart" :size="16" />
         <span>我喜欢的音乐</span>
@@ -136,6 +143,8 @@ watch(() => _cachedUser.value, (user) => {
 }
 .sb-item:hover { color: var(--text); background: var(--bg-hover); }
 .sb-item.active { color: var(--accent); background: var(--accent-soft); }
+.sb-item-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.sb-item-icon :deep(svg) { width: 16px; height: 16px; display: block; }
 .sb-playlists { flex: 1; display: flex; flex-direction: column; min-height: 0; margin-top: 4px; }
 .sb-pl-header {
   display: flex; align-items: center; gap: 6px;

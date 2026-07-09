@@ -10,6 +10,40 @@ function truncateForLog(obj: any, maxLen = 500): string {
   } catch { return String(obj); }
 }
 
+/** 获取用户详情（/user/detail?uid=）
+ *  返回 signature/createTime/gender/city/province 等完整资料 */
+export async function userDetail(uid: number): Promise<{
+  code: number;
+  profile?: {
+    userId: number;
+    nickname: string;
+    avatarUrl: string;
+    signature?: string;
+    createTime?: number;
+    gender?: number;
+    city?: number;
+    province?: number;
+    backgroundUrl?: string;
+    [key: string]: any;
+  };
+  [key: string]: any;
+}> {
+  log.info("netease-api-music", "→ userDetail()", { uid });
+  const r = await apiGet("/user/detail", { uid });
+  log.info("netease-api-music", "← userDetail result", {
+    code: r.code,
+    hasProfile: !!r.profile,
+    nickname: r.profile?.nickname,
+    signature: r.profile?.signature,
+    gender: r.profile?.gender,
+    city: r.profile?.city,
+    createTime: r.profile?.createTime,
+    keys: r && typeof r === "object" ? Object.keys(r) : [],
+    rawPreview: truncateForLog(r, 600),
+  });
+  return r;
+}
+
 /** 听歌足迹 - 总收听时长（/listen/data/total） */
 export async function listenDataTotal(): Promise<{
   code: number;
@@ -38,7 +72,7 @@ export async function vipInfo(uid?: number): Promise<{
     redVipLevel?: number;
     redVipLevelIcon?: string;
     musicPackage?: { vipCode?: number; vipLevel?: number; expireTime?: number };
-    associator?: { vipCode?: number; vipLevel?: number; expireTime?: number };
+    associator?: { vipCode?: number; vipLevel?: number; expireTime?: number; iconUrl?: string; dynamicIconUrl?: string };
     isVip?: boolean;
     [key: string]: any;
   };

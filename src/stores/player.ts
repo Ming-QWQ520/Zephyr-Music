@@ -53,7 +53,7 @@ export const usePlayerStore = defineStore("player", {
     return {
       queue: session?.queue || [], currentIndex: session?.currentIndex ?? -1, isPlaying: false,
       currentTime: session?.currentTime || 0, duration: 0, buffered: 0,
-      volume: session?.volume ?? 0.8, muted: session?.muted ?? false, shuffle: false, repeat: "off",
+      volume: session?.volume ?? 0.8, muted: session?.muted ?? false, shuffle: false, repeat: "all",
       lyrics: [], activeLyricIndex: -1,
       currentView: "recommend", searchKeyword: "", history: [],
       previousView: null,

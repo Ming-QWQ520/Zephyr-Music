@@ -629,7 +629,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctrl-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-sm); color: var(--text-secondary); transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out); }
 .ctrl-btn:hover { color: var(--text); background: var(--bg-hover); }
 .ctrl-btn:active { background: var(--bg-active); }
-.ctrl-btn.active { color: var(--accent); background: var(--accent-soft); }
+.ctrl-btn.active { color: var(--accent); }
 .ctrl-btn[disabled] { opacity: 0.38; cursor: not-allowed; pointer-events: none; }
 .ctrl-icon { width: 18px; height: 18px; pointer-events: none; }
 .dislike-btn:hover { color: #ff4d4f; }

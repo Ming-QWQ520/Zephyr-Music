@@ -78,7 +78,12 @@ export async function captchaSent(phone: string, ctcode?: string): Promise<{ cod
 }
 
 /** 登录状态 — 返回 profile（已登录）或 null（未登录） */
-export async function loginStatus(): Promise<{ code: number; account: any; profile: any }> {
+export async function loginStatus(): Promise<{ code: number; account: any; profile: {
+  userId?: number; nickname?: string; avatarUrl?: string;
+  signature?: string; createTime?: number; gender?: number;
+  city?: number; province?: number; backgroundUrl?: string;
+  [key: string]: any;
+} | null }> {
   log.info(TAG, "loginStatus()");
   const r = await apiGet("/login/status");
   log.info("netease-api-login", "← loginStatus 原始数据", {

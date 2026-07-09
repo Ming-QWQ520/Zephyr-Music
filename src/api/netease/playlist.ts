@@ -3,7 +3,7 @@ import { log } from "@/composables/logger";
 import { apiGet, TAG, _cachedUser, _cachedPlaylists, _playlistsLoading } from "./core";
 import { loginStatus } from "./auth";
 import { getCookie } from "./core";
-import type { NeteasePlaylist, NeteaseSong } from "@/types";
+import type { NeteasePlaylist, NeteaseSong, NeteaseUser } from "@/types";
 
 /** 用户歌单列表 */
 export async function userPlaylist(uid: number, limit = 100): Promise<{
@@ -98,7 +98,7 @@ export async function playlistUpdatePlaycount(id: number): Promise<{ code: numbe
 // ===== 带缓存的用户/歌单获取（避免风控）=====
 
 /** 获取用户信息（带缓存） */
-export async function getCachedUser(): Promise<{ userId: number; nickname: string; avatarUrl: string } | null> {
+export async function getCachedUser(): Promise<NeteaseUser | null> {
   if (_cachedUser.value) {
     log.info(TAG, "getCachedUser (cache hit)", { userId: _cachedUser.value.userId });
     return _cachedUser.value;
@@ -110,12 +110,20 @@ export async function getCachedUser(): Promise<{ userId: number; nickname: strin
   try {
     const res = await loginStatus();
     if (res.profile) {
+      const p = res.profile;
       _cachedUser.value = {
-        userId: res.profile.userId || (res.account?.id as number),
-        nickname: res.profile.nickname || "网易云用户",
-        avatarUrl: res.profile.avatarUrl || "",
+        userId: p.userId || (res.account?.id as number),
+        nickname: p.nickname || "网易云用户",
+        avatarUrl: p.avatarUrl || "",
+        // 直接从 loginStatus 的 profile 提取完整资料，避免等 userDetail 补全
+        signature: p.signature || "",
+        createTime: p.createTime,
+        gender: p.gender,
+        city: p.city,
+        province: p.province,
+        backgroundUrl: p.backgroundUrl || "",
       };
-      log.info(TAG, "getCachedUser (fetched)", { userId: _cachedUser.value.userId, nickname: _cachedUser.value.nickname });
+      log.info(TAG, "getCachedUser (fetched)", { userId: _cachedUser.value.userId, nickname: _cachedUser.value.nickname, hasBg: !!_cachedUser.value.backgroundUrl });
       return _cachedUser.value;
     }
     log.warn(TAG, "getCachedUser: no profile in response", { code: res.code });

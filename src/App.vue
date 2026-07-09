@@ -4,7 +4,7 @@ import { usePlayerStore } from "@/stores/player";
 import { useAudioBinding } from "@/composables/useAudioBinding";
 import { log } from "@/composables/logger";
 import { useNeteaseAuth } from "@/composables/useNeteaseAuth";
-import { useNeteaseUser } from "@/composables/useNeteaseUser";
+import { useNeteaseUser, formatCreateTime, genderText, regionText } from "@/composables/useNeteaseUser";
 import { useWindowControls } from "@/composables/useWindowControls";
 import { useHomeSettings } from "@/composables/useHomeSettings";
 import Sidebar from "@/components/Sidebar.vue";
@@ -14,6 +14,7 @@ import NeteaseView from "@/components/NeteaseView.vue";
 import QueueView from "@/components/QueueView.vue";
 import LibraryView from "@/components/LibraryView.vue";
 import RecommendView from "@/components/RecommendView.vue";
+import ProfileView from "@/components/ProfileView.vue";
 import SongCommentsView from "@/components/SongCommentsView.vue";
 import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
@@ -40,6 +41,44 @@ const {
 
 // 网易云用户信息（VIP/等级/听歌时长）
 const { neVipInfo, neListenTotal, neUserLevel } = useNeteaseUser();
+
+// ===== 标题栏弹窗 VIP 图标（同 ProfileView 逻辑：动画图优先，失败回退常规图） =====
+const neVipIconSrc = ref("");
+const neVipDynamicFailed = ref(false);
+function resetNeVipIcon() {
+  neVipDynamicFailed.value = false;
+  const v = neVipInfo.value;
+  if (!v) { neVipIconSrc.value = ""; return; }
+  if (v.dynamicIconUrl) neVipIconSrc.value = v.dynamicIconUrl;
+  else if (v.iconUrl) neVipIconSrc.value = v.iconUrl;
+  else neVipIconSrc.value = "";
+}
+function onNeVipIconError() {
+  if (neVipDynamicFailed.value) return;
+  neVipDynamicFailed.value = true;
+  const fb = neVipInfo.value?.iconUrl || "";
+  if (fb && neVipIconSrc.value !== fb) neVipIconSrc.value = fb;
+}
+// 每次打开弹窗时重置 VIP 图，触发动画图重新请求+播放
+watch(showLoginDropdown, (open) => { if (open) resetNeVipIcon(); });
+
+/** 用户卡片"个人资料"行的内联 SVG 图标（Icon.vue 暂未提供 calendar/user/mapPin） */
+const SVG_CALENDAR = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M4 9h16M8 3v4M16 3v4"/></svg>`;
+const SVG_USER = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20a8 8 0 0 1 16 0"/></svg>`;
+const SVG_MAPPIN = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12Z"/><circle cx="12" cy="9" r="2.5"/></svg>`;
+
+/** 用户卡片"个人资料"信息行（注册时间 / 性别 / 所在地），空值自动隐藏 */
+const neProfileItems = computed(() => {
+  const u = neUser.value;
+  if (!u) return [];
+  const items: { label: string; value: string; icon: string }[] = [];
+  const created = formatCreateTime(u.createTime);
+  if (created) items.push({ label: "注册时间", value: created, icon: SVG_CALENDAR });
+  if (u.gender === 1 || u.gender === 2) items.push({ label: "性别", value: genderText(u.gender), icon: SVG_USER });
+  const region = regionText(u.province, u.city);
+  if (region) items.push({ label: "所在地", value: region, icon: SVG_MAPPIN });
+  return items;
+});
 
 // 窗口控制（最小化/最大化/关闭）
 const { minimizeWindow, toggleMaximize, closeWindow } = useWindowControls();
@@ -270,15 +309,38 @@ onUnmounted(() => {
           <!-- 已登录：用户信息下拉 -->
           <Transition name="dropdown">
             <div v-if="showLoginDropdown && neLoggedIn" class="ne-dropdown" @click.stop>
-              <div class="ne-logged-info">
+              <!-- Header: 头像 + 昵称 + VIP 徽章 + 个性签名 -->
+              <div class="ne-card-header">
                 <img v-if="neUser?.avatarUrl" :src="neUser.avatarUrl" class="ne-avatar-lg" referrerpolicy="no-referrer" />
-                <span class="ne-logged-name">{{ neUser?.nickname }}</span>
-                <div v-if="neVipInfo" class="ne-vip-badge" :class="{ vip: neVipInfo.isVip }">
-                  <span v-if="neVipInfo.isVip">VIP{{ neVipInfo.redVipLevel || "" }}</span>
-                  <span v-else>非 VIP</span>
-                  <span v-if="neVipInfo.expireText" class="ne-vip-expire">到期: {{ neVipInfo.expireText }}</span>
+                <div class="ne-header-text">
+                  <div class="ne-header-name-row">
+                    <span class="ne-logged-name">{{ neUser?.nickname }}</span>
+                    <!-- VIP 图标：优先动画图(dynamicIconUrl)，失败回退常规图(iconUrl) -->
+                    <img
+                      v-if="neVipIconSrc"
+                      :src="neVipIconSrc"
+                      class="ne-vip-icon"
+                      :class="{ 'is-dynamic': !neVipDynamicFailed }"
+                      referrerpolicy="no-referrer"
+                      :alt="neVipInfo?.isVip ? `黑胶VIP${neVipInfo.redVipLevel || ''}` : 'VIP'"
+                      @error="onNeVipIconError"
+                    />
+                  </div>
+                  <p v-if="neUser?.signature" class="ne-signature" :title="neUser.signature">{{ neUser.signature }}</p>
+                  <p v-if="neVipInfo?.expireText" class="ne-vip-expire-line">VIP 到期: {{ neVipInfo.expireText }}</p>
                 </div>
               </div>
+
+              <!-- 个人资料: 注册时间 / 性别 / 所在地（空值自动隐藏） -->
+              <div v-if="neProfileItems.length" class="ne-profile-grid">
+                <div v-for="item in neProfileItems" :key="item.label" class="ne-profile-item">
+                  <span class="ne-profile-icon" v-html="item.icon" />
+                  <span class="ne-profile-label">{{ item.label }}</span>
+                  <span class="ne-profile-value">{{ item.value }}</span>
+                </div>
+              </div>
+
+              <!-- 总听歌时长 -->
               <div v-if="neListenTotal" class="ne-listen-total">
                 <Icon name="clock" :size="13" />
                 <span>总听歌时长: {{ neListenTotal }}</span>
@@ -297,6 +359,7 @@ onUnmounted(() => {
                   <span>还需听歌 {{ neUserLevel.needPlay }} 首</span>
                 </div>
               </div>
+
               <button class="ne-logout-btn" @click="doNeLogout">退出登录</button>
             </div>
           </Transition>
@@ -334,6 +397,7 @@ onUnmounted(() => {
         <RecommendView v-else-if="store.currentView === 'recommend'" />
         <QueueView v-else-if="store.currentView === 'queue'" />
         <LibraryView v-else-if="store.currentView === 'library'" />
+        <ProfileView v-else-if="store.currentView === 'profile'" />
         <SongCommentsView v-else-if="store.currentView === 'songcomments'" />
         <div v-else class="placeholder-view">
           <Icon name="music" :size="48" />
@@ -561,9 +625,10 @@ onUnmounted(() => {
 
 .ne-dropdown {
   position: absolute; top: 100%; right: 0; z-index: 9999;
-  min-width: 200px; background: var(--bg-elev-3);
+  min-width: 260px; background: var(--bg-elev-3);
   border: 1px solid var(--border-strong); border-radius: 12px;
-  box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 16px; text-align: center;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 14px;
+  text-align: left; display: flex; flex-direction: column; gap: 10px;
 }
 .qr-gen-btn { padding: 10px 20px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 13px; }
 .qr-gen-btn:hover { opacity: 0.9; }
@@ -573,21 +638,32 @@ onUnmounted(() => {
 .qr-img { width: 160px; height: 160px; border-radius: 8px; background: #fff; padding: 6px; }
 .qr-expired { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.7); border-radius: 8px; color: #fff; font-size: 12px; cursor: pointer; }
 .qr-msg { font-size: 11px; color: var(--text-tertiary); margin: 8px 0 0; }
-.ne-logged-info { display: flex; flex-direction: column; align-items: center; gap: 6px; margin-bottom: 10px; }
-.ne-avatar-lg { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
-.ne-logged-name { font-size: 14px; color: var(--text); font-weight: 600; }
-.ne-logged-info span { font-size: 13px; color: var(--text); }
+/* Header: 头像 + 昵称 + VIP 徽章 + 个性签名 */
+.ne-card-header { display: flex; align-items: flex-start; gap: 10px; }
+.ne-avatar-lg { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+.ne-header-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ne-header-name-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ne-logged-name { font-size: 14px; color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ne-signature { margin: 0; font-size: 11px; color: var(--text-tertiary); font-style: italic; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.ne-vip-expire-line { margin: 0; font-size: 10px; color: var(--text-tertiary); opacity: 0.85; }
 /* VIP 标识 */
-.ne-vip-badge { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 3px 10px; border-radius: 10px; font-size: 11px; background: var(--bg-elev-1); color: var(--text-tertiary); }
-.ne-vip-badge.vip { background: linear-gradient(135deg, #ffd700, #ff8c00); color: #fff; font-weight: 600; }
-.ne-vip-expire { font-size: 10px; opacity: 0.8; font-weight: 400; }
+/* VIP 图标（动画图/常规图） */
+.ne-vip-icon { height: 22px; width: auto; max-width: 90px; object-fit: contain; flex-shrink: 0; border-radius: 3px; }
+.ne-vip-icon.is-dynamic { height: 26px; }
+/* 个人资料: 注册时间 / 性别 / 所在地 */
+.ne-profile-grid { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; background: var(--bg-elev-1); border-radius: var(--radius-sm); }
+.ne-profile-item { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 11px; }
+.ne-profile-icon { display: inline-flex; align-items: center; color: var(--text-tertiary); opacity: 0.8; flex-shrink: 0; }
+.ne-profile-icon :deep(svg) { display: block; }
+.ne-profile-label { color: var(--text-tertiary); flex-shrink: 0; }
+.ne-profile-value { color: var(--text-secondary); margin-left: auto; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* 总听歌时长 */
-.ne-listen-total { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 11px; color: var(--text-tertiary); margin-bottom: 10px; }
+.ne-listen-total { display: flex; align-items: center; justify-content: center; gap: 5px; font-size: 11px; color: var(--text-tertiary); }
 .ne-listen-total :deep(.icon-svg) { opacity: 0.7; }
-.ne-logout-btn { padding: 6px 16px; border-radius: var(--radius-full); font-size: 12px; color: var(--text-tertiary); border: 1px solid var(--border); transition: all 0.15s; }
+.ne-logout-btn { padding: 6px 16px; border-radius: var(--radius-full); font-size: 12px; color: var(--text-tertiary); border: 1px solid var(--border); transition: all 0.15s; align-self: center; }
 .ne-logout-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 /* 用户等级 */
-.ne-level-info { width: 100%; margin-bottom: 10px; padding: 10px 12px; background: var(--bg-elev-1); border-radius: var(--radius-sm); }
+.ne-level-info { width: 100%; padding: 10px 12px; background: var(--bg-elev-1); border-radius: var(--radius-sm); }
 .ne-level-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
 .ne-level-badge { font-size: 13px; font-weight: 700; color: var(--accent); }
 .ne-level-progress-text { font-size: 11px; color: var(--text-tertiary); }
