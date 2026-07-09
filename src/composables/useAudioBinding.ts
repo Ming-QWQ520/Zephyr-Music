@@ -99,7 +99,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       log.info(TAG, "scrobble skipped (reportTime=0)", { songId: info.neteaseId, name: info.name, isAutoNext, playTime, duration: info.duration });
       return;
     }
-    log.info(TAG, "doScrobble", { songId: info.neteaseId, name: info.name, isAutoNext, reportTime, playTime, duration: info.duration, accumulatedTime: info.accumulatedTime });
+    log.info(TAG, "doScrobble 开始", { songId: info.neteaseId, name: info.name, isAutoNext, reportTime, playTime, duration: info.duration, accumulatedTime: info.accumulatedTime });
     scrobbleV1(info.neteaseId, reportTime, {
       sourceid: info.sourceid || undefined,
       song: info.name,
@@ -396,6 +396,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   const onError = () => { if (usingRodio.value) return; const a = ensureAudio(); log.error(TAG, "audio error", { code: a?.error?.code, msg: a?.error?.message }); };
   const onEnded = () => {
     if (usingRodio.value) return;
+    log.info(TAG, "=== onEnded 触发 === 播放完毕", { song: scrobbleInfo?.name, songId: scrobbleInfo?.neteaseId, duration: scrobbleInfo?.duration, accumulatedTime: scrobbleInfo?.accumulatedTime });
     // 播放完毕自动切歌：上报完整时长
     if (scrobbleInfo) {
       doScrobble(scrobbleInfo, true); // true = 自动切歌（播放完）
