@@ -84,18 +84,22 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     }
   }
 
-  /** 上报打卡：对当前歌曲调用 /scrobble/v1（加密版，同步播放时长到听歌排行） */
+  /** 上报打卡：对当前歌曲调用 /scrobble/v1（加密版，同步播放时长到听歌排行）
+   *  isAutoNext=true: 完整播放完，上报完整时长（duration）
+   *  isAutoNext=false: 手动切歌，上报实际播放时长（accumulatedTime） */
   function doScrobble(info: ScrobbleInfo | null, isAutoNext: boolean = false) {
     if (!info) return;
     // 停止计时
     stopTicking();
     const playTime = Math.floor(info.accumulatedTime);
-    if (playTime <= 0) {
-      log.info(TAG, "scrobble skipped (playTime=0)", { songId: info.neteaseId, name: info.name });
+    // 完整播放完：直接用 duration 作为播放时长（不依赖 accumulatedTime）
+    // 手动切歌：用实际累计播放时长
+    const reportTime = isAutoNext ? Math.floor(info.duration || playTime) : playTime;
+    if (reportTime <= 0) {
+      log.info(TAG, "scrobble skipped (reportTime=0)", { songId: info.neteaseId, name: info.name, isAutoNext, playTime, duration: info.duration });
       return;
     }
-    // 如果是自动切歌（播放完），上报完整时长
-    const reportTime = isAutoNext ? Math.floor(info.duration || playTime) : playTime;
+    log.info(TAG, "doScrobble", { songId: info.neteaseId, name: info.name, isAutoNext, reportTime, playTime, duration: info.duration, accumulatedTime: info.accumulatedTime });
     scrobbleV1(info.neteaseId, reportTime, {
       sourceid: info.sourceid || undefined,
       song: info.name,
