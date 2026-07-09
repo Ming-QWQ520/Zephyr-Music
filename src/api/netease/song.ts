@@ -84,21 +84,9 @@ export async function songDetail(ids: number[]): Promise<{
 export async function scrobble(id: number, sourceid: number, time?: number): Promise<{ code: number }> {
   const params: Record<string, string | number> = { id, sourceid };
   if (time !== undefined && time >= 0) params.time = time;
-  log.info(TAG, "scrobble(local eapi)", { id, sourceid, time });
-  const local = await reportPlaybackLocal({
-    mode: "eapi",
-    songId: id,
-    sourceId: sourceid > 0 ? String(sourceid) : undefined,
-    playTime: Math.max(1, Math.floor(time ?? 60)),
-  });
-  if (local) {
-    const code = local.eapi?.code ?? local.code;
-    log.info(TAG, "scrobble local result", { id, sourceid, code });
-    return { code };
-  }
-  log.info(TAG, "scrobble(remote fallback)", { id, sourceid, time });
-  const r = await apiGet("/scrobble", params);
-  log.info(TAG, "scrobble result", { id, sourceid, code: r.code });
+  log.info(TAG, "scrobble", { id, sourceid, time });
+  const r = await apiGet<{ code: number }>("/scrobble", params);
+  log.info(TAG, "scrobble result", { id, sourceid, time, code: r.code });
   return r;
 }
 
