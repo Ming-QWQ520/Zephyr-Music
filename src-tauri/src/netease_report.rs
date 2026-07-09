@@ -417,8 +417,11 @@ async fn ncbl_scrobble_v1(
     }
 
     // PLD 时间戳 = PLV 时间戳 + 实际播放时长（模拟播放过程）
-    // Go SDK 中 PLD 在播放一半后上报，这里用 plv_ts + played 作为 PLD 时间戳
     let pld_ts = plv_ts + played as i64;
+
+    // 等待至少 2 秒再上传 PLD，模拟真实播放间隔
+    // Go SDK 中 PLV 和 PLD 之间有 sleep(played * 1000)，这里至少等 2 秒
+    std::thread::sleep(std::time::Duration::from_secs(2));
 
     let pld = build_pld(ctx, song, source, played, is_auto_next);
     let pld_body = build_ncbl_records(&[(pld_ts, "_pld", pld)]);
