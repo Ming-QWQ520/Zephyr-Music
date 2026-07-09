@@ -399,10 +399,12 @@ async fn ncbl_scrobble_v1(
     let played = song.total_time.min(play_time.max(1));
     let meta = build_ncbl_meta_json(ctx);
     let cookie = build_ncbl_cookie(ctx);
-    let ts = chrono::Local::now().timestamp();
+
+    // PLV 时间戳 = 当前时间（播放开始时间）
+    let plv_ts = chrono::Local::now().timestamp();
 
     let plv = build_plv(ctx, song, source);
-    let plv_body = build_ncbl_records(&[(ts, "_plv", plv)]);
+    let plv_body = build_ncbl_records(&[(plv_ts, "_plv", plv)]);
     let plv_result = ncbl_upload(ctx, &meta, &plv_body, &cookie).await?;
     if !plv_result
         .get("success")
@@ -412,8 +414,12 @@ async fn ncbl_scrobble_v1(
         return Ok(json!({ "code": 500, "message": "PLV report failed", "plv": plv_result }));
     }
 
+    // PLD 时间戳 = PLV 时间戳 + 实际播放时长（模拟播放过程）
+    // Go SDK 中 PLD 在播放一半后上报，这里用 plv_ts + played 作为 PLD 时间戳
+    let pld_ts = plv_ts + played as i64;
+
     let pld = build_pld(ctx, song, source, played);
-    let pld_body = build_ncbl_records(&[(ts, "_pld", pld)]);
+    let pld_body = build_ncbl_records(&[(pld_ts, "_pld", pld)]);
     let pld_result = ncbl_upload(ctx, &meta, &pld_body, &cookie).await?;
     if !pld_result
         .get("success")
