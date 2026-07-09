@@ -15,6 +15,7 @@ interface LocalReportRequest {
   bitrate?: number;
   level?: string;
   mode: LocalReportMode;
+  isAutoNext?: boolean;
 }
 
 interface LocalReportResponse {
@@ -118,6 +119,7 @@ export async function scrobbleV1(
     bitrate?: number;
     level?: string;
     total?: number;
+    isAutoNext?: boolean;
   }
 ): Promise<{ code: number }> {
   const params: Record<string, string | number> = { id, time };
@@ -137,6 +139,7 @@ export async function scrobbleV1(
     totalTime: options?.total ? Math.max(1, Math.floor(options.total)) : undefined,
     bitrate: options?.bitrate,
     level: options?.level,
+    isAutoNext: options?.isAutoNext,
   });
   if (local) {
     const code = local.ncbl?.code ?? local.code;

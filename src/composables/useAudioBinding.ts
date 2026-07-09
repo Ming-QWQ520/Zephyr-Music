@@ -15,6 +15,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let songLoading = false;
   let recentScrobbleTimer: ReturnType<typeof setTimeout> | null = null;
+  let scrobbleDone = false; // onEnded 上报后设为 true，避免 watch(currentSong) 重复上报
 
   // ===== 听歌打卡（仅加密版 /scrobble/v1）=====
   // 精确跟踪每首歌的实际播放时长，应对所有场景：
@@ -100,6 +101,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       song: info.name,
       artist: info.artist,
       total: info.duration,
+      isAutoNext,
     }).then(() => {
       log.info(TAG, "scrobble v1 ok", {
         songId: info.neteaseId,
@@ -183,9 +185,13 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
 
       // 切换歌曲时：对上一首网易云歌曲上报打卡
       // 手动切歌（不是自动播放完毕）
+      // 如果 onEnded 已经上报过（scrobbleDone=true），跳过避免重复
       if (oldSong && oldSong.source === "netease" && oldSong.neteaseId) {
         if (!song || song.neteaseId !== oldSong.neteaseId) {
-          doScrobble(scrobbleInfo, false); // false = 手动切歌
+          if (!scrobbleDone) {
+            doScrobble(scrobbleInfo, false); // false = 手动切歌
+          }
+          scrobbleDone = false; // 重置标记
         }
       }
 
@@ -389,6 +395,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     // 播放完毕自动切歌：上报完整时长
     if (scrobbleInfo) {
       doScrobble(scrobbleInfo, true); // true = 自动切歌（播放完）
+      scrobbleDone = true; // 标记已上报，避免 watch(currentSong) 重复上报
     }
     store.next();
   };

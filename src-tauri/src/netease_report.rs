@@ -37,6 +37,7 @@ pub struct PlaybackReportRequest {
     pub level: Option<String>,
     pub mode: Option<String>,
     pub dry_run: Option<bool>,
+    pub is_auto_next: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -139,7 +140,7 @@ async fn report_playback(
                 source_type: "track".to_string(),
                 name: "list".to_string(),
             };
-            ncbl_result = Some(ncbl_scrobble_v1(&ctx, &song, &source, play_time).await?);
+            ncbl_result = Some(ncbl_scrobble_v1(&ctx, &song, &source, play_time, request.is_auto_next.unwrap_or(false)).await?);
         }
     }
 
@@ -392,6 +393,7 @@ async fn ncbl_scrobble_v1(
     song: &NcblSong,
     source: &NcblSource,
     play_time: u32,
+    is_auto_next: bool,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     if ctx.token.is_empty() {
         return Ok(json!({ "code": 401, "message": "missing MUSIC_U token" }));
@@ -418,7 +420,7 @@ async fn ncbl_scrobble_v1(
     // Go SDK 中 PLD 在播放一半后上报，这里用 plv_ts + played 作为 PLD 时间戳
     let pld_ts = plv_ts + played as i64;
 
-    let pld = build_pld(ctx, song, source, played);
+    let pld = build_pld(ctx, song, source, played, is_auto_next);
     let pld_body = build_ncbl_records(&[(pld_ts, "_pld", pld)]);
     let pld_result = ncbl_upload(ctx, &meta, &pld_body, &cookie).await?;
     if !pld_result
@@ -478,7 +480,7 @@ fn build_plv(ctx: &NcblContext, song: &NcblSong, source: &NcblSource) -> Value {
     })
 }
 
-fn build_pld(ctx: &NcblContext, song: &NcblSong, source: &NcblSource, played: u32) -> Value {
+fn build_pld(ctx: &NcblContext, song: &NcblSong, source: &NcblSource, played: u32, is_auto_next: bool) -> Value {
     let now = chrono::Local::now().timestamp_millis();
     let add_refer = format!(
         "[F:63][{now}#616#{}#{}#c9156c3][e][2][92][btn_pc_cover_play|cell_pc_songlist_song:6|page_pc_songlist_songflow|page_mine_like_music][:::|{}:song:x:x|:::|{}:list::]",
@@ -518,7 +520,7 @@ fn build_pld(ctx: &NcblContext, song: &NcblSong, source: &NcblSource, played: u3
         "rightSource": 0,
         "sourceId": source.id,
         "sourcetype": source.source_type,
-        "end": "interrupt",
+        "end": if is_auto_next { "playend" } else { "interrupt" },
         "libra_abt": "",
         "channel": ctx.channel,
         "curStartChannel": ""
