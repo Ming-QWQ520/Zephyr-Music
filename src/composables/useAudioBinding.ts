@@ -393,7 +393,20 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   };
   const onPlay = () => { if (!usingRodio.value && !songLoading) store.setPlaying(true); };
   const onPause = () => { if (!usingRodio.value && !songLoading) store.setPlaying(false); };
-  const onError = () => { if (usingRodio.value) return; const a = ensureAudio(); log.error(TAG, "audio error", { code: a?.error?.code, msg: a?.error?.message }); };
+  const onError = () => {
+    if (usingRodio.value) return;
+    const a = ensureAudio();
+    log.error(TAG, "audio error", { code: a?.error?.code, msg: a?.error?.message, currentTime: a?.currentTime, duration: a?.duration });
+    // 如果播放进度超过 90%，当作播放完毕处理（URL 过期等情况）
+    if (scrobbleInfo && a && a.duration > 0 && a.currentTime / a.duration > 0.9) {
+      log.info(TAG, "audio error 但播放进度>90%，当作播放完毕处理", { currentTime: a.currentTime, duration: a.duration });
+      if (scrobbleInfo) {
+        doScrobble(scrobbleInfo, true);
+        scrobbleDone = true;
+      }
+      store.next();
+    }
+  };
   const onEnded = () => {
     if (usingRodio.value) return;
     log.info(TAG, "=== onEnded 触发 === 播放完毕", { song: scrobbleInfo?.name, songId: scrobbleInfo?.neteaseId, duration: scrobbleInfo?.duration, accumulatedTime: scrobbleInfo?.accumulatedTime });
