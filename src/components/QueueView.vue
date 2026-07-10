@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, nextTick, onMounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import Icon from "@/components/Icon.vue";
 
@@ -7,6 +7,7 @@ const store = usePlayerStore();
 
 const queue = computed(() => store.queue);
 const currentId = computed(() => store.currentSong?.id);
+const listRef = ref<HTMLElement | null>(null);
 
 function play(index: number) {
   if (index === store.currentIndex) {
@@ -26,6 +27,29 @@ function remove(index: number) {
 function clear() {
   store.clearQueue();
 }
+
+/** 滚动到当前播放歌曲（复位，直接设置 scrollTop 避免影响父容器） */
+function scrollToCurrent() {
+  const idx = store.currentIndex;
+  if (idx < 0 || !listRef.value) return;
+  const list = listRef.value;
+  const el = list.children[idx] as HTMLElement;
+  if (!el) return;
+  const targetTop = el.offsetTop - list.offsetTop;
+  list.scrollTo({ top: targetTop, behavior: "smooth" });
+}
+
+/** 打开时自动滚动到当前播放歌曲 */
+onMounted(() => {
+  nextTick(() => {
+    const idx = store.currentIndex;
+    if (idx > 0 && listRef.value) {
+      const list = listRef.value;
+      const el = list.children[idx] as HTMLElement;
+      if (el) list.scrollTop = el.offsetTop - list.offsetTop;
+    }
+  });
+});
 
 // ===== 拖拽排序 =====
 const dragFromIdx = ref<number | null>(null);
@@ -70,13 +94,19 @@ function onDragEnd() {
           共 <span class="count">{{ queue.length }}</span> 首
         </p>
       </div>
-      <button v-if="queue.length" class="clear-btn" @click="clear">
-        <Icon name="trash" :size="14" />
-        <span>清空</span>
-      </button>
+      <div class="header-actions">
+        <button v-if="queue.length && store.currentIndex >= 0" class="locate-btn" title="定位当前播放" @click="scrollToCurrent">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>
+          <span>复位</span>
+        </button>
+        <button v-if="queue.length" class="clear-btn" @click="clear">
+          <Icon name="trash" :size="14" />
+          <span>清空</span>
+        </button>
+      </div>
     </header>
 
-    <div class="list nice-scroll">
+    <div ref="listRef" class="list nice-scroll">
       <div v-if="!queue.length" class="empty">
         <Icon name="list" :size="42" />
         <p>播放队列为空</p>
@@ -153,6 +183,7 @@ function onDragEnd() {
   color: var(--text);
   font-variant-numeric: tabular-nums;
 }
+.header-actions { display: flex; gap: 8px; }
 .clear-btn {
   display: inline-flex;
   align-items: center;
@@ -167,6 +198,24 @@ function onDragEnd() {
   transition: color 0.15s, background 0.15s, border-color 0.15s;
 }
 .clear-btn:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.locate-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.locate-btn:hover {
   color: var(--accent);
   border-color: var(--accent);
   background: var(--accent-soft);

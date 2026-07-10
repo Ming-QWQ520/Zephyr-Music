@@ -47,9 +47,12 @@ function openRecord() {
 const activeItem = computed<string>(() => {
   if (store.currentView === "library") return "library";
   if (store.currentView === "netease") {
-    if (store.pendingPlaylistId === -2) return "record";
-    // 检查 pendingPlaylistId 或已选歌单
-    const pid = store.pendingPlaylistId;
+    // 听歌排行 = -2
+    if (store.pendingPlaylistId === -2 || store.sourcePlaylistId === -2) return "record";
+    // 我喜欢的音乐 = favPlaylist.id
+    if (favPlaylist.value && (store.pendingPlaylistId === favPlaylist.value.id || store.sourcePlaylistId === favPlaylist.value.id)) return "fav";
+    // 检查 pendingPlaylistId 或 sourcePlaylistId（sourcePlaylistId 在选中后保留）
+    const pid = store.pendingPlaylistId ?? store.sourcePlaylistId;
     if (pid !== null && pid > 0) return `pl-${pid}`;
     return "";
   }

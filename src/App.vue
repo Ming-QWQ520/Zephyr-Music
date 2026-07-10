@@ -392,7 +392,18 @@ onUnmounted(() => {
       <Sidebar />
 
       <main class="main-view">
-        <SearchView v-if="store.currentView === 'search'" />
+        <!-- nowplaying 时保留上一个视图的内容，避免动画期间透出 placeholder -->
+        <template v-if="store.currentView === 'nowplaying' && store.previousView">
+          <SearchView v-if="store.previousView === 'search'" />
+          <NeteaseView v-else-if="store.previousView === 'netease'" />
+          <RecommendView v-else-if="store.previousView === 'recommend'" />
+          <QueueView v-else-if="store.previousView === 'queue'" />
+          <LibraryView v-else-if="store.previousView === 'library'" />
+          <ProfileView v-else-if="store.previousView === 'profile'" />
+          <SongCommentsView v-else-if="store.previousView === 'songcomments'" />
+          <RecommendView v-else />
+        </template>
+        <SearchView v-else-if="store.currentView === 'search'" />
         <NeteaseView v-else-if="store.currentView === 'netease'" />
         <RecommendView v-else-if="store.currentView === 'recommend'" />
         <QueueView v-else-if="store.currentView === 'queue'" />
@@ -522,6 +533,13 @@ onUnmounted(() => {
 .app-shell.has-wallpaper .app-body {
   position: relative;
   z-index: 1;
+}
+/* 壁纸场景：PlayerBar 半透明玻璃效果 */
+.app-shell.has-wallpaper :deep(.player-bar) {
+  background: rgba(33, 31, 38, 0.55) !important;
+  backdrop-filter: blur(20px) saturate(1.6) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.6) !important;
+  border-top-color: rgba(255, 255, 255, 0.10) !important;
 }
 
 /* ----- Titlebar ----- */
@@ -767,16 +785,14 @@ onUnmounted(() => {
 /* ----- NowPlaying transition ----- */
 .np-fade-enter-active,
 .np-fade-leave-active {
-  transition: opacity 0.32s var(--ease-out), transform 0.32s var(--ease-out);
+  transition: transform 0.32s var(--ease-out);
 }
-/* Enter: slide down from top (from -100% to 0) */
+/* Enter: 从底部向上滑入（从音乐栏方向滑入），不用 opacity 避免透出底层 */
 .np-fade-enter-from {
-  opacity: 0;
-  transform: translateY(-100%);
+  transform: translateY(100%);
 }
-/* Leave: slide down to bottom (from 0 to 100%) — "从上往下移动收起" */
+/* Leave: 向下滑出（回到音乐栏方向） */
 .np-fade-leave-to {
-  opacity: 0;
   transform: translateY(100%);
 }
 

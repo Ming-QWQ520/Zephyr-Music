@@ -24,6 +24,19 @@ const dailyRecommendSongs = ref<Song[]>([]);
 const personalRoamSongs = ref<Song[]>([]);
 // 私人雷达 = 固定歌单 ID 3136952023
 const personalRadarCover = ref("");
+const personalRadarName = ref("");
+const personalRadarFirstSong = ref("");
+
+const dailyFirstSong = computed(() => dailyRecommendSongs.value[0] || null);
+const dailyCoverUrl = computed(() => dailyFirstSong.value?.pic || "");
+const dailySubText = computed(() => {
+  const name = dailyFirstSong.value?.name;
+  return name ? `每日推荐 | 从[${name}]听起` : `${dailyRecommendSongs.value.length} 首推荐歌曲`;
+});
+const radarSubText = computed(() => {
+  const name = personalRadarFirstSong.value;
+  return name ? `私人雷达 | 从[${name}]听起` : (personalRadarName.value || '为你打造的歌单');
+});
 
 // 榜单精选 - 支持用户自定义（持久化到 localStorage）
 interface RankingItem { id: number; name: string; coverImgUrl: string; songs: Song[]; loading: boolean; }
@@ -229,8 +242,11 @@ async function loadData() {
   }
 
   // 私人雷达封面（固定歌单 ID 3136952023）
-  playlistDetail(3136952023, 0).then(res => {
+  playlistDetail(3136952023, 1).then(res => {
     personalRadarCover.value = res.playlist?.coverImgUrl || "";
+    personalRadarName.value = res.playlist?.name || "";
+    const firstTrack = res.playlist?.tracks?.[0];
+    personalRadarFirstSong.value = firstTrack?.name || "";
   }).catch(e => { log.warn("recommend-view", "personal radar failed", { error: String(e) }); });
 
   loading.value = false;
@@ -296,6 +312,41 @@ async function dislikeSong(song: Song) {
 function openPersonalRadar() {
   store.pendingPlaylistId = 3136952023;
   store.setView("netease");
+}
+
+/** 打开每日推荐详情页（不直接播放） */
+function openDailyRecommend() {
+  if (!dailyRecommendSongs.value.length) return;
+  store.pendingPlaylistId = -1;
+  store.setView("netease");
+}
+
+/** 打开私人漫游详情页（不直接播放） */
+function openPersonalRoam() {
+  if (!personalRoamSongs.value.length) return;
+  store.pendingPlaylistId = -3;
+  store.setView("netease");
+}
+
+/** 播放私人雷达歌单（点击封面播放按钮时调用） */
+async function playPersonalRadarPlaylist() {
+  try {
+    const res = await playlistDetail(3136952023, 0);
+    const trackIds = res.playlist?.trackIds || [];
+    if (!trackIds.length) { toast.error("播放失败", "私人雷达歌单为空"); return; }
+    const ids = trackIds.slice(0, 100).map(t => t.id);
+    const { playlistTrackAll } = await import("@/api/netease");
+    const detail = await playlistTrackAll(3136952023, 0, ids.length);
+    const songs = (detail.songs || []).map(neteaseSongToSong);
+    if (songs.length) {
+      store.setSourcePlaylistId(3136952023);
+      store.playList(songs, 0);
+      toast.success("私人雷达", `开始播放 ${songs.length} 首歌曲`);
+    }
+  } catch (e) {
+    log.warn("recommend-view", "play personal radar failed", { error: String(e) });
+    toast.error("播放失败", "请稍后重试");
+  }
 }
 
 function playSong(song: Song) {
@@ -412,9 +463,18 @@ function confirmAddToPlaylist(pl: NeteasePlaylist) {
 }
 
 function onDocClick() { closeContextMenu(); }
+
+// 5分钟缓存：退出播放界面重新进入推荐页时，5分钟内不重复加载
+const RECOMMEND_CACHE_MS = 5 * 60 * 1000;
+let lastRecommendLoadTime = 0;
+
 onMounted(() => {
   document.addEventListener("click", onDocClick);
-  loadData();
+  const now = Date.now();
+  if (now - lastRecommendLoadTime > RECOMMEND_CACHE_MS) {
+    loadData();
+    lastRecommendLoadTime = now;
+  }
 });
 onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 </script>
@@ -424,32 +484,42 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
     <!-- 顶部入口卡片：每日推荐 / 私人漫游 / 私人雷达 -->
     <div class="entry-cards">
       <!-- 每日推荐 = /recommend/songs 每日推荐歌曲 -->
-      <button class="entry-card" @click="playDailyRecommend" :disabled="!dailyRecommendSongs.length">
-        <div class="entry-cover daily-cover">
-          <div class="entry-date">{{ new Date().getDate() }}</div>
+      <div class="entry-card" :class="{ disabled: !dailyRecommendSongs.length }">
+        <div class="entry-cover daily-cover" @click="openDailyRecommend">
+          <img v-if="dailyCoverUrl" :src="dailyCoverUrl" alt="每日推荐" referrerpolicy="no-referrer" loading="lazy" />
+          <div v-else class="entry-date">{{ new Date().getDate() }}</div>
+          <button class="entry-play-btn" title="播放每日推荐" @click.stop="playDailyRecommend" :disabled="!dailyRecommendSongs.length">
+            <Icon name="play" :size="20" />
+          </button>
         </div>
-        <div class="entry-name">每日推荐</div>
-        <div class="entry-sub">{{ dailyRecommendSongs.length }} 首推荐歌曲</div>
-      </button>
+        <div class="entry-name" @click="openDailyRecommend">每日推荐</div>
+        <div class="entry-sub" @click="openDailyRecommend">{{ dailySubText }}</div>
+      </div>
 
       <!-- 私人漫游 = /recommend/resource 推荐歌曲 -->
-      <button class="entry-card" @click="playPersonalRoam" :disabled="!personalRoamSongs.length">
-        <div class="entry-cover roam-cover">
+      <div class="entry-card" :class="{ disabled: !personalRoamSongs.length }">
+        <div class="entry-cover roam-cover" @click="openPersonalRoam">
           <Icon name="shuffle" :size="28" />
+          <button class="entry-play-btn" title="播放私人漫游" @click.stop="playPersonalRoam" :disabled="!personalRoamSongs.length">
+            <Icon name="play" :size="20" />
+          </button>
         </div>
-        <div class="entry-name">私人漫游</div>
-        <div class="entry-sub">{{ personalRoamSongs.length }} 首推荐歌曲</div>
-      </button>
+        <div class="entry-name" @click="openPersonalRoam">私人漫游</div>
+        <div class="entry-sub" @click="openPersonalRoam">{{ personalRoamSongs.length }} 首推荐歌曲</div>
+      </div>
 
       <!-- 私人雷达 = 固定歌单 ID 3136952023 -->
-      <button class="entry-card" @click="openPersonalRadar">
-        <div class="entry-cover radar-cover">
+      <div class="entry-card">
+        <div class="entry-cover radar-cover" @click="openPersonalRadar">
           <img v-if="personalRadarCover" :src="personalRadarCover + '?param=200x200'" alt="私人雷达" referrerpolicy="no-referrer" loading="lazy" />
           <Icon v-else name="radio" :size="28" />
+          <button class="entry-play-btn" title="播放私人雷达" @click.stop="playPersonalRadarPlaylist">
+            <Icon name="play" :size="20" />
+          </button>
         </div>
-        <div class="entry-name">私人雷达</div>
-        <div class="entry-sub">为你打造的歌单</div>
-      </button>
+        <div class="entry-name" @click="openPersonalRadar">私人雷达</div>
+        <div class="entry-sub" @click="openPersonalRadar">{{ radarSubText }}</div>
+      </div>
     </div>
 
     <!-- 每日推荐歌曲列表（带不感兴趣按钮） -->
@@ -524,8 +594,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
               @contextmenu="onContextMenu($event, song)">
               <span class="ranking-idx">{{ idx + 1 }}</span>
               <span class="ranking-song-name truncate">{{ song.name }}</span>
-              <!-- 榜单精选只显示喜欢按钮（已喜欢时常驻红色，未喜欢时 hover 显示） -->
-              <div v-if="song.source === 'netease'" class="nmn-row-actions" :class="{ 'has-liked': song.neteaseId && songLikedSet.has(song.neteaseId) }">
+              <span class="ranking-artist truncate">{{ song.artist }}</span>
+              <div v-if="song.source === 'netease'" class="nmn-row-actions ranking-actions" :class="{ 'has-liked': song.neteaseId && songLikedSet.has(song.neteaseId) }">
                 <button class="nmn-action-btn nmn-action-like"
                   :class="{ liked: song.neteaseId && songLikedSet.has(song.neteaseId) }"
                   :title="song.neteaseId && songLikedSet.has(song.neteaseId) ? '取消喜欢' : '喜欢'"
@@ -533,8 +603,13 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
                   <img v-if="song.neteaseId && songLikedSet.has(song.neteaseId)" src="/icons/like.svg" alt="liked" class="nmn-action-icon" />
                   <img v-else src="/icons/not_like.svg" alt="not liked" class="nmn-action-icon" />
                 </button>
+                <button class="nmn-action-btn nmn-action-playlist" title="添加至歌单" @click.stop="openAddToPlaylistDialogForRow(song)">
+                  <img src="/icons/add_playlist.svg" alt="add to playlist" class="nmn-action-icon" />
+                </button>
+                <button class="nmn-action-btn nmn-action-next" title="下一首播放" @click.stop="store.playNext(song)">
+                  <Icon name="next" :size="15" />
+                </button>
               </div>
-              <span class="ranking-artist truncate">{{ song.artist }}</span>
             </div>
           </div>
         </div>
@@ -648,16 +723,31 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .entry-card {
   display: flex; flex-direction: column; gap: 8px; text-align: left;
   flex: 0 0 140px; transition: transform 0.2s var(--ease-out);
+  cursor: pointer;
 }
-.entry-card:hover:not(:disabled) { transform: translateY(-3px); }
-.entry-card:disabled { opacity: 0.5; cursor: not-allowed; }
+.entry-card:hover { transform: translateY(-3px); }
+.entry-card.disabled { opacity: 0.5; cursor: not-allowed; }
+.entry-card.disabled:hover { transform: none; }
 .entry-cover {
   position: relative; aspect-ratio: 1; border-radius: var(--radius);
   overflow: hidden; background: var(--bg-elev-3);
   display: flex; align-items: center; justify-content: center;
   color: var(--text-tertiary); box-shadow: var(--shadow-sm);
+  cursor: pointer;
 }
 .entry-cover img { width: 100%; height: 100%; object-fit: cover; }
+.entry-play-btn {
+  position: absolute; bottom: 8px; right: 8px;
+  width: 36px; height: 36px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform 0.2s var(--ease-out), background 0.2s var(--ease-out);
+  backdrop-filter: blur(4px); z-index: 3; cursor: pointer;
+}
+.entry-play-btn:hover { transform: scale(1.12); background: rgba(0, 0, 0, 0.8); }
+.entry-play-btn:active { transform: scale(0.95); }
+.entry-play-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.entry-play-btn :deep(.icon-svg) { margin-left: 2px; pointer-events: none; }
 .daily-cover { background: linear-gradient(135deg, #ff6b35, #fa233b); color: #fff; }
 .roam-cover { background: linear-gradient(135deg, #6750A4, #9d4edd); color: #fff; }
 .radar-cover { background: linear-gradient(135deg, #06d6a0, #118ab2); color: #fff; }
@@ -833,13 +923,36 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ranking-header:hover .ranking-arrow { color: var(--accent); }
 .ranking-loading { display: flex; justify-content: center; padding: 12px; }
 .ranking-songs { display: flex; flex-direction: column; gap: 2px; }
-.ranking-song { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); text-align: left; transition: background 0.15s; }
+.ranking-song { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--radius-sm); text-align: left; transition: background 0.15s; }
 .ranking-song:hover { background: var(--bg-hover); }
 .ranking-song.active { color: var(--accent); background: var(--accent-soft); }
 .ranking-idx { width: 20px; text-align: center; font-size: 13px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .ranking-song.active .ranking-idx { color: var(--accent); }
 .ranking-song-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text); }
 .ranking-artist { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; max-width: 100px; }
+/* 操作按钮层：仅 hover 时显示，无独立背景（与行 hover 背景融为一体，无割裂） */
+.ranking-actions {
+  position: absolute; right: 0; top: 0; bottom: 0;
+  display: none !important;
+  align-items: center; gap: 2px;
+  background: transparent !important;
+  padding: 0 6px 0 8px;
+  z-index: 2;
+}
+.ranking-song .ranking-actions .nmn-action-btn {
+  opacity: 0 !important;
+}
+.ranking-song:hover .ranking-actions {
+  display: flex !important;
+}
+.ranking-song:hover .ranking-actions .nmn-action-btn {
+  opacity: 0.7 !important;
+}
+.ranking-song:hover .ranking-actions .nmn-action-btn.liked {
+  opacity: 1 !important;
+}
+/* hover 时隐藏歌手名，避免与按钮层重叠 */
+.ranking-song:hover .ranking-artist { opacity: 0 !important; }
 
 /* 右键菜单（与搜索界面样式一致） */
 .ctx-menu { position: fixed; z-index: 500; min-width: 180px; background: var(--bg-elev-3); border: 1px solid var(--border-strong); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.4); padding: 4px; }
@@ -902,5 +1015,20 @@ body.has-wallpaper .ranking-song.active {
 }
 body.has-wallpaper .card-cover {
   box-shadow: 0 4px 16px rgba(0,0,0,0.35);
+}
+body.has-wallpaper .ranking-song .ranking-actions {
+  display: none !important;
+}
+body.has-wallpaper .ranking-song:hover .ranking-actions {
+  display: flex !important;
+}
+body.has-wallpaper .ranking-song .ranking-actions .nmn-action-btn {
+  opacity: 0 !important;
+}
+body.has-wallpaper .ranking-song:hover .ranking-actions .nmn-action-btn {
+  opacity: 0.7 !important;
+}
+body.has-wallpaper .ranking-song:hover .ranking-actions .nmn-action-btn.liked {
+  opacity: 1 !important;
 }
 </style>

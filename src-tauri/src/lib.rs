@@ -224,6 +224,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(LogFile(Mutex::new(None)))
         .manage(Arc::new(Mutex::new(AudioState::new())))
         .invoke_handler(tauri::generate_handler![

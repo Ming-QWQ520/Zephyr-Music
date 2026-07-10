@@ -227,12 +227,12 @@ function useUrlWallpaper() {
 .home-settings-overlay {
   position: fixed; inset: 0; z-index: 900;
   background: rgba(0,0,0,0.4); backdrop-filter: blur(6px);
-  display: flex; align-items: center; justify-content: center;
+  display: flex; align-items: stretch; justify-content: stretch;
 }
 .home-settings-card {
-  width: 480px; max-width: 92vw; max-height: 84vh;
-  background: var(--bg-elev-3); border: 1px solid var(--border-strong);
-  border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,0.5);
+  width: 100%; max-width: 100%; height: 100%; max-height: 100%;
+  background: var(--bg-elev-3); border: none; border-radius: 0;
+  box-shadow: none;
   display: flex; flex-direction: column; overflow: hidden;
 }
 .hs-head {

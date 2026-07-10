@@ -218,9 +218,15 @@ export function useSettings() {
 </script>
 
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
+import { openUrl } from "@tauri-apps/plugin-opener";
+
+/** 打开外部链接（通过 opener 插件调用系统浏览器） */
+async function openLink(url: string) {
+  try { await openUrl(url); } catch { window.open(url, "_blank"); }
+}
 
 const props = withDefaults(defineProps<{
   visible: boolean;
@@ -265,7 +271,22 @@ function resetAll() {
   emit("reset");
 }
 
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.4";
+
+/** GitHub Star 数 */
+const starCount = ref<number | null>(null);
+const starLoading = ref(false);
+onMounted(async () => {
+  starLoading.value = true;
+  try {
+    const res = await fetch("https://api.github.com/repos/Ming-QWQ520/Zephyr-Music");
+    if (res.ok) {
+      const data = await res.json();
+      starCount.value = data.stargazers_count ?? 0;
+    }
+  } catch { /* ignore */ }
+  starLoading.value = false;
+});
 </script>
 
 <template>
@@ -637,25 +658,32 @@ const APP_VERSION = "1.0.0";
 
               <!-- 链接列表 -->
               <div class="about-links">
-                <a class="about-link-item" href="https://github.com/Ming-QWQ520/Zephyr-Music/" target="_blank" rel="noopener">
+                <div class="about-link-item" @click="openLink('https://github.com/Ming-QWQ520/Zephyr-Music')">
                   <div class="about-link-icon"><Icon name="info" :size="16" /></div>
                   <div class="about-link-content">
                     <div class="about-link-title">GitHub 仓库</div>
-                    <div class="about-link-url">github.com/Ming-QWQ520/Zephyr-Music</div>
+                    <div class="about-link-url">Ming-QWQ520/Zephyr-Music</div>
                   </div>
-                </a>
-                <div class="about-link-item">
+                </div>
+                <div class="about-link-item" @click="openLink('https://github.com/Ming-QWQ520/Zephyr-Music/stargazers')">
+                  <div class="about-link-icon"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" stroke="none"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></div>
+                  <div class="about-link-content">
+                    <div class="about-link-title">项目 Star</div>
+                    <div class="about-link-url">{{ starLoading ? '加载中...' : (starCount !== null ? starCount + ' Stars' : '点击查看') }}</div>
+                  </div>
+                </div>
+                <div class="about-link-item" @click="openLink('https://v.douyin.com/uMPJmKswYwM')">
                   <div class="about-link-icon"><Icon name="info" :size="16" /></div>
                   <div class="about-link-content">
-                    <div class="about-link-title">开源协议</div>
-                    <div class="about-link-url">AGPL-3.0</div>
+                    <div class="about-link-title">作者主页</div>
+                    <div class="about-link-url">抖音: 点击跳转</div>
                   </div>
                 </div>
                 <div class="about-link-item">
                   <div class="about-link-icon"><Icon name="info" :size="16" /></div>
                   <div class="about-link-content">
-                    <div class="about-link-title">作者主页</div>
-                    <div class="about-link-url">抖音号: czm529797</div>
+                    <div class="about-link-title">开源协议</div>
+                    <div class="about-link-url">AGPL-3.0</div>
                   </div>
                 </div>
               </div>

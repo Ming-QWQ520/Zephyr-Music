@@ -352,6 +352,8 @@ function onQueueDragEnd() { dragFromIdx.value = null; dragOverIdx.value = null; 
 /** 清空播放队列 */
 function clearQueue() { store.clearQueue(); }
 
+const qpListRef = ref<HTMLElement | null>(null);
+
 /** 打开播放队列弹窗（先转圈1秒） */
 function toggleQueuePopup() {
   if (showQueuePopup.value) {
@@ -361,8 +363,26 @@ function toggleQueuePopup() {
   // 先显示转圈
   queueLoading.value = true;
   showQueuePopup.value = true;
-  // 1秒后显示列表
-  setTimeout(() => { queueLoading.value = false; }, 1000);
+  // 1秒后显示列表，并滚动到当前播放歌曲
+  setTimeout(() => {
+    queueLoading.value = false;
+    nextTick(() => scrollQueueToCurrent(false));
+  }, 1000);
+}
+
+/** 滚动播放队列到当前播放歌曲（直接设置 scrollTop，避免影响父容器滚动） */
+function scrollQueueToCurrent(smooth = true) {
+  const idx = store.currentIndex;
+  if (idx < 0 || !qpListRef.value) return;
+  const list = qpListRef.value;
+  const el = list.children[idx] as HTMLElement;
+  if (!el) return;
+  const targetTop = el.offsetTop - list.offsetTop;
+  if (smooth) {
+    list.scrollTo({ top: targetTop, behavior: "smooth" });
+  } else {
+    list.scrollTop = targetTop;
+  }
 }
 
 // 播放队列右键菜单
@@ -481,7 +501,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <Icon name="list" :size="18" />
         </button>
       </div>
-      <div class="progress-row">
+      <div class="progress-row" @click.stop @pointerdown.stop>
         <span class="time cur">{{ progressText }}</span>
         <Slider class="progress" :model-value="progressFrac" :format="(v) => formatTime(v * store.duration)" @change="onSeek" />
         <span class="time dur">{{ durationText }}</span>
@@ -541,7 +561,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       <div v-if="queueLoading" class="qp-loading">
         <div class="spinner" />
       </div>
-      <div v-else class="qp-list nice-scroll">
+      <div v-else ref="qpListRef" class="qp-list nice-scroll">
         <div
           v-for="(s, idx) in queueList"
           :key="s.id"
@@ -569,6 +589,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <Icon v-if="s.id === store.currentSong?.id && store.isPlaying" name="volume" :size="14" class="qp-now" />
         </div>
       </div>
+      <!-- 复位键（浮动在右下角） -->
+      <button v-if="store.currentIndex >= 0 && !queueLoading" class="qp-locate-fab" title="定位当前播放" @click.stop="scrollQueueToCurrent(true)">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>
+      </button>
     </aside>
   </Transition>
 
@@ -629,7 +653,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctrl-btn { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-sm); color: var(--text-secondary); transition: color 0.2s var(--ease-out), background 0.2s var(--ease-out); }
 .ctrl-btn:hover { color: var(--text); background: var(--bg-hover); }
 .ctrl-btn:active { background: var(--bg-active); }
-.ctrl-btn.active { color: var(--accent); }
+.ctrl-btn.active { color: #ffffff; }
 .ctrl-btn[disabled] { opacity: 0.38; cursor: not-allowed; pointer-events: none; }
 .ctrl-icon { width: 18px; height: 18px; pointer-events: none; }
 .dislike-btn:hover { color: #ff4d4f; }
@@ -737,6 +761,22 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   flex-direction: column;
   overflow: hidden;
 }
+/* 复位键（浮动在播放队列右下角） */
+.qp-locate-fab {
+  position: absolute;
+  right: 12px; bottom: 12px;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 10;
+  transition: transform 0.15s var(--ease-out), opacity 0.15s;
+  cursor: pointer;
+}
+.qp-locate-fab:hover { transform: scale(1.1); }
+.qp-locate-fab:active { transform: scale(0.95); }
 .qp-head {
   display: flex; align-items: center; gap: 8px;
   padding: 14px 16px 10px; border-bottom: 1px solid var(--border);

@@ -304,13 +304,33 @@ const showSettings = ref(false);
 const showQueue = ref(false);
 const queueLoading = ref(false);
 const topbarVisible = ref(false);
+const qpListRef = ref<HTMLElement | null>(null);
 
 /** 切换播放列表面板（先转圈1秒） */
 function toggleQueue() {
   if (showQueue.value) { showQueue.value = false; return; }
   queueLoading.value = true;
   showQueue.value = true;
-  setTimeout(() => { queueLoading.value = false; }, 1000);
+  setTimeout(() => {
+    queueLoading.value = false;
+    // 打开后滚动到当前播放歌曲
+    nextTick(() => scrollQueueToCurrent(false));
+  }, 1000);
+}
+
+/** 滚动播放列表到当前歌曲（直接设置 scrollTop，避免影响父容器滚动） */
+function scrollQueueToCurrent(smooth = true) {
+  const idx = store.currentIndex;
+  if (idx < 0 || !qpListRef.value) return;
+  const list = qpListRef.value;
+  const el = list.children[idx] as HTMLElement;
+  if (!el) return;
+  const targetTop = el.offsetTop - list.offsetTop;
+  if (smooth) {
+    list.scrollTo({ top: targetTop, behavior: "smooth" });
+  } else {
+    list.scrollTop = targetTop;
+  }
 }
 let hideTopbarTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -1476,7 +1496,7 @@ const queueList = computed(() => store.queue);
       aria-hidden="true"
     ></canvas>
 
-    <!-- Queue panel (slides from right) -->
+    <!-- Queue panel (从右侧居中弹出) -->
     <Transition name="queue-slide">
       <aside v-if="showQueue" class="queue-panel">
         <header class="qp-head">
@@ -1489,7 +1509,7 @@ const queueList = computed(() => store.queue);
         <div v-if="queueLoading" class="qp-loading">
           <div class="spinner" />
         </div>
-        <div v-else class="qp-list nice-scroll">
+        <div v-else ref="qpListRef" class="qp-list nice-scroll">
           <button
             v-for="(s, idx) in queueList"
             :key="s.id"
@@ -1508,6 +1528,10 @@ const queueList = computed(() => store.queue);
             <Icon v-if="s.id === song?.id && store.isPlaying" name="volume" :size="14" class="now-playing" />
           </button>
         </div>
+        <!-- 复位键（浮动在右下角） -->
+        <button v-if="store.currentIndex >= 0 && !queueLoading" class="qp-locate-fab" title="定位当前播放" @click.stop="scrollQueueToCurrent(true)">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>
+        </button>
       </aside>
     </Transition>
 
@@ -1539,7 +1563,6 @@ const queueList = computed(() => store.queue);
   overflow: hidden;
   background: #000;
   color: var(--text);
-  animation: fade-in 0.32s var(--ease-out) both;
 }
 
 /* ----- Background layers (RNP-style) ----- */
@@ -1892,7 +1915,7 @@ const queueList = computed(() => store.queue);
   background: rgba(255, 255, 255, 0.1);
 }
 .ctrl-btn:active { transform: scale(0.92); }
-.ctrl-btn.active { color: var(--accent); }
+.ctrl-btn.active { color: #ffffff; }
 .ctrl-btn[disabled] { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
 /* 播放按钮：无圆形白色背景，与其他按钮一致 */
 .ctrl-btn.play {
@@ -2068,20 +2091,39 @@ const queueList = computed(() => store.queue);
 /* ----- Queue panel ----- */
 .queue-panel {
   position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(360px, 32vw);
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  width: min(300px, 26vw);
+  max-height: 70vh;
+  height: 70vh;
   z-index: 30;
-  background: rgba(10, 10, 12, 0.85);
+  background: rgba(10, 10, 12, 0.88);
   backdrop-filter: blur(28px) saturate(180%);
   -webkit-backdrop-filter: blur(28px) saturate(180%);
-  border-left: 1px solid var(--border);
+  border: 1px solid var(--border);
+  border-radius: 12px;
   display: flex;
   flex-direction: column;
   padding: 12px;
-  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.4);
+  box-shadow: -8px 0 40px rgba(0, 0, 0, 0.5);
 }
+/* 复位键（浮动在播放队列右下角） */
+.qp-locate-fab {
+  position: absolute;
+  right: 12px; bottom: 12px;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 10;
+  transition: transform 0.15s var(--ease-out), opacity 0.15s;
+  cursor: pointer;
+}
+.qp-locate-fab:hover { transform: scale(1.1); }
+.qp-locate-fab:active { transform: scale(0.95); }
 .qp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
 .qp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .queue-slide-enter-active,
@@ -2090,7 +2132,7 @@ const queueList = computed(() => store.queue);
 }
 .queue-slide-enter-from,
 .queue-slide-leave-to {
-  transform: translateX(40px);
+  transform: translateY(-50%) translateX(40px);
   opacity: 0;
 }
 .qp-head {

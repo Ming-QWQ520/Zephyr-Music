@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import {
-  playlistTrackAll, recommendSongs, userRecord,
+  playlistTrackAll, recommendSongs, recommendResource, userRecord,
   getCachedUser, getCachedPlaylists,
   neteaseSongToSong, getCookie, _cachedUser,
   likeSong, playlistTracks, getCachedLikeList, addLikeCache, removeLikeCache,
@@ -87,6 +87,7 @@ async function selectPlaylist(pl: NeteasePlaylist) {
   playCountMap.value = new Map();
   songLikedSet.value = new Set();
   selectedPlaylistId.value = pl.id;
+  store.setSourcePlaylistId(pl.id);
   selectedPlaylistName.value = pl.name;
   selectedPlaylistCover.value = pl.coverImgUrl || "";
   // 清空详情数据
@@ -122,6 +123,7 @@ async function loadDailyRecommend() {
   playCountMap.value = new Map();
   songLikedSet.value = new Set();
   selectedPlaylistId.value = -1;
+  store.setSourcePlaylistId(-1);
   selectedPlaylistName.value = "每日推荐";
   selectedPlaylistCover.value = "";
   loadingSongs.value = true;
@@ -130,6 +132,48 @@ async function loadDailyRecommend() {
     currentPlaylistSongs.value = (res.data?.dailySongs || []).map(neteaseSongToSong);
     loadSongLikedStatus();
   } catch { currentPlaylistSongs.value = []; }
+  loadingSongs.value = false;
+}
+
+/** 加载私人漫游（推荐资源） - /recommend/resource 返回推荐歌曲列表 */
+async function loadPersonalRoam() {
+  if (selectedPlaylistId.value === -3 && currentPlaylistSongs.value.length > 0) return;
+  loadInitiated.value = true;
+  isRecordView.value = false;
+  playCountMap.value = new Map();
+  songLikedSet.value = new Set();
+  selectedPlaylistId.value = -3;
+  store.setSourcePlaylistId(-3);
+  selectedPlaylistName.value = "私人漫游";
+  selectedPlaylistCover.value = "";
+  // 清空详情数据（私人漫游没有评论/收藏者）
+  playlistDesc.value = "";
+  playlistDynamic.value = null;
+  playlistComments.value = [];
+  playlistSubs.value = [];
+  commentPageNo.value = 1;
+  commentCursor.value = undefined;
+  commentHasMore.value = false;
+  subsOffset.value = 0;
+  activeDetailTab.value = "songs";
+  loadingSongs.value = true;
+  try {
+    const res = await recommendResource();
+    const recList = res.recommend || res.data || [];
+    currentPlaylistSongs.value = recList.slice(0, 30).map((s: any) => neteaseSongToSong({
+      id: s.id,
+      name: s.name,
+      ar: s.artists || s.ar,
+      al: s.album || s.al,
+      dt: s.duration || s.dt,
+      picUrl: s.picUrl,
+    } as any));
+    loadSongLikedStatus();
+    log.info("netease-view", "personal roam loaded", { count: currentPlaylistSongs.value.length });
+  } catch (e) {
+    log.warn("netease-view", "load personal roam failed", { error: String(e) });
+    currentPlaylistSongs.value = [];
+  }
   loadingSongs.value = false;
 }
 
@@ -166,6 +210,7 @@ async function loadRecord(type: 0 | 1 = 1) {
   recordType.value = type;
   isRecordView.value = true;
   selectedPlaylistId.value = -2;
+  store.setSourcePlaylistId(-2);
   selectedPlaylistName.value = "听歌排行";
   selectedPlaylistCover.value = "";
   loadingSongs.value = true;
@@ -214,6 +259,7 @@ async function loadPlaylistById(id: number) {
   playCountMap.value = new Map();
   songLikedSet.value = new Set();
   selectedPlaylistId.value = id;
+  store.setSourcePlaylistId(id);
   loadingSongs.value = true;
   // 清空详情数据
   playlistDesc.value = "";
@@ -288,6 +334,15 @@ async function loadPlaylistExtra(id: number) {
 }
 
 async function loadComments(id: number, reset = false) {
+  // 私人漫游(-3)/每日推荐(-1)/听歌排行(-2) 等非真实歌单没有评论
+  if (id <= 0) {
+    playlistComments.value = [];
+    commentTotal.value = 0;
+    commentHasMore.value = false;
+    commentCursor.value = undefined;
+    commentPageNo.value = 1;
+    return;
+  }
   if (loadingComments.value) return;
   if (reset) {
     commentPageNo.value = 1; playlistComments.value = []; commentTotal.value = 0;
@@ -314,6 +369,13 @@ async function switchCommentSort(sort: 1 | 2 | 3) {
 }
 
 async function loadSubscribers(id: number, reset = false) {
+  // 私人漫游(-3)/每日推荐(-1)/听歌排行(-2) 等非真实歌单没有收藏者
+  if (id <= 0) {
+    playlistSubs.value = [];
+    subsTotal.value = 0;
+    subsOffset.value = 0;
+    return;
+  }
   if (loadingSubs.value) return;
   if (reset) { subsOffset.value = 0; playlistSubs.value = []; subsTotal.value = 0; }
   loadingSubs.value = true;
@@ -353,17 +415,23 @@ function goBack() {
 /** 是否显示返回按钮（榜单等非用户歌单时显示） */
 const showBackBtn = computed(() => {
   const pid = selectedPlaylistId.value;
-  // 每日推荐(-1)和听歌排行(-2)不显示返回
-  if (pid === -1 || pid === -2) return false;
+  // 每日推荐(-1)、听歌排行(-2)、私人漫游(-3)不显示返回
+  if (pid === -1 || pid === -2 || pid === -3) return false;
   // 用户歌单列表中的不显示返回
   if (playlists.value.some(p => p.id === pid)) return false;
   return true;
 });
 
 /** 是否显示详情标签页（歌曲/评论/收藏者）
- *  所有真实歌单（id > 0）都显示，每日推荐(-1)和听歌排行(-2)不显示 */
+ *  所有真实歌单（id > 0）和私人漫游(-3)都显示，每日推荐(-1)和听歌排行(-2)不显示 */
 const showDetailTabs = computed(() => {
   if (isRecordView.value) return false;
+  const pid = selectedPlaylistId.value;
+  return pid !== null && (pid > 0 || pid === -3);
+});
+
+/** 是否显示评论/收藏者标签（仅真实歌单 id > 0 才显示） */
+const showExtraTabs = computed(() => {
   const pid = selectedPlaylistId.value;
   return pid !== null && pid > 0;
 });
@@ -523,6 +591,7 @@ watch(() => store.pendingPlaylistId, (id) => {
   if (id !== null) {
     if (id === -1) { loadDailyRecommend(); }
     else if (id === -2) { loadRecord(recordType.value); }
+    else if (id === -3) { loadPersonalRoam(); }
     else {
       // 先从缓存的歌单列表找
       const pl = playlists.value.find(p => p.id === id);
@@ -585,10 +654,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       <!-- 详情标签页（所有真实歌单都显示：歌曲/评论/收藏者） -->
       <div v-if="showDetailTabs" class="detail-tabs">
         <button class="detail-tab" :class="{ active: activeDetailTab === 'songs' }" @click="activeDetailTab = 'songs'">歌曲</button>
-        <button class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="activeDetailTab = 'comments'">
+        <button v-if="showExtraTabs" class="detail-tab" :class="{ active: activeDetailTab === 'comments' }" @click="activeDetailTab = 'comments'">
           评论<span v-if="commentTotal"> ({{ formatCount(commentTotal) }})</span>
         </button>
-        <button class="detail-tab" :class="{ active: activeDetailTab === 'subscribers' }" @click="activeDetailTab = 'subscribers'">
+        <button v-if="showExtraTabs" class="detail-tab" :class="{ active: activeDetailTab === 'subscribers' }" @click="activeDetailTab = 'subscribers'">
           收藏者<span v-if="subsTotal"> ({{ formatCount(subsTotal) }})</span>
         </button>
       </div>
