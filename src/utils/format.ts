@@ -21,3 +21,13 @@ export function formatListenTime(seconds: number): string {
   if (h > 0) return `${h}小时${m}分钟`;
   return `${m}分钟`;
 }
+
+/** 安全地截断长字符串/对象用于日志输出。
+ *  obj 可以是任意值：字符串直接截断，其他类型先 JSON.stringify。 */
+export function truncateForLog(obj: unknown, maxLen = 500): string {
+  try {
+    const s = typeof obj === "string" ? obj : JSON.stringify(obj);
+    if (!s) return String(s);
+    return s.length > maxLen ? s.slice(0, maxLen) + `...(truncated, total ${s.length} chars)` : s;
+  } catch { return String(obj); }
+}

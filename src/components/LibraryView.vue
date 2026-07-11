@@ -40,7 +40,7 @@ async function loadRecent() {
   }
 }
 
-function play(song: Song, idx: number) {
+function play(_song: Song, idx: number) {
   store.playList(recentSongs.value, idx);
 }
 

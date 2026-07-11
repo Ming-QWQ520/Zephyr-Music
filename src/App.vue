@@ -18,7 +18,7 @@ import ProfileView from "@/components/ProfileView.vue";
 import SongCommentsView from "@/components/SongCommentsView.vue";
 import PlayerBar from "@/components/PlayerBar.vue";
 import NowPlayingView from "@/components/NowPlayingView.vue";
-import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
+import { useSettings } from "@/composables/useSettings";
 import HomeSettingsPanel from "@/components/HomeSettingsPanel.vue";
 import WindowControls from "@/components/WindowControls.vue";
 import ToastContainer from "@/components/ToastContainer.vue";
@@ -33,7 +33,7 @@ const {
   neLoggedIn, neUser, showLoginDropdown,
   qrCodeImg, qrStatus, qrMessage,
   showLoginModal, loginTab, loginLoading, loginError,
-  phoneForm, captchaSentFlag, emailForm,
+  phoneForm, emailForm,
   checkNeLogin, startNeLogin, doNeLogout,
   closeDropdown, openLoginModal, closeLoginModal,
   doPhoneLogin, doSendCaptcha, doEmailLogin,
@@ -86,8 +86,9 @@ const { minimizeWindow, toggleMaximize, closeWindow } = useWindowControls();
 const audioRef = ref<HTMLAudioElement | null>(null);
 useAudioBinding(audioRef);
 
-/** 首页设置弹窗（独立于播放界面设置） */
-const showHomeSettings = ref(false);
+/** 首页设置作为 main-view 视图显示（不覆盖侧边栏和音乐栏） */
+function openHomeSettings() { store.setView("settings"); }
+function closeHomeSettings() { store.setView("recommend"); }
 const showNowPlaying = computed(() => store.currentView === "nowplaying");
 
 /** 主题切换（light / dark / auto） */
@@ -280,7 +281,7 @@ onUnmounted(() => {
 
     <!-- 全屏壁纸背景层（覆盖整个窗口，包括标题栏） -->
     <div v-if="hasWallpaper" class="wallpaper-bg">
-      <img :src="homeSettings.bgImage" class="wallpaper-img" :style="{ filter: `blur(${homeSettings.bgBlur}px) brightness(${1 - homeSettings.bgDim / 100 * 0.7})`, objectFit: homeSettings.bgFit }" @error="onWallpaperError" />
+      <img :src="homeSettings.bgImage" class="wallpaper-img" :style="{ filter: `blur(${homeSettings.bgBlur}px) brightness(${1 - homeSettings.bgDim / 100 * 0.7})`, objectFit: 'cover', transform: homeSettings.bgFit === 'contain' ? 'scale(1)' : 'scale(1.05)' }" @error="onWallpaperError" />
     </div>
 
     <!-- Titlebar（品牌 + 右侧操作，搜索框和窗口控件已剥离浮于其上）-->
@@ -371,7 +372,7 @@ onUnmounted(() => {
         <button class="icon-btn theme-toggle" :title="`主题：${settings.colorMode}`" @click="toggleColorMode">
           <Icon :name="settings.colorMode === 'dark' ? 'moon' : 'sun'" :size="16" />
         </button>
-        <button class="icon-btn" title="首页设置" @click="showHomeSettings = true">
+        <button class="icon-btn" :class="{ active: store.currentView === 'settings' }" title="首页设置" @click="openHomeSettings">
           <img src="/icons/settings.svg" alt="settings" class="settings-icon" />
         </button>
       </div>
@@ -410,6 +411,7 @@ onUnmounted(() => {
         <LibraryView v-else-if="store.currentView === 'library'" />
         <ProfileView v-else-if="store.currentView === 'profile'" />
         <SongCommentsView v-else-if="store.currentView === 'songcomments'" />
+        <HomeSettingsPanel v-else-if="store.currentView === 'settings'" :visible="true" @close="closeHomeSettings" />
         <div v-else class="placeholder-view">
           <Icon name="music" :size="48" />
           <p>选择一首歌开始播放</p>
@@ -425,8 +427,7 @@ onUnmounted(() => {
       <NowPlayingView v-if="showNowPlaying" />
     </Transition>
 
-    <!-- 首页设置弹窗（独立于播放界面设置） -->
-    <HomeSettingsPanel :visible="showHomeSettings" @close="showHomeSettings = false" />
+    <!-- 首页设置已移至 main-view 视图 -->
 
     <!-- 登录弹窗 -->
     <Transition name="login-modal">
@@ -515,7 +516,6 @@ onUnmounted(() => {
   width: 100%;
   height: 100%;
   object-position: center;
-  transform: scale(1.05); /* 避免 blur 边缘出现透明边 */
 }
 /* 有壁纸时，标题栏/侧边栏/主视图背景透明，露出壁纸 */
 .app-shell.has-wallpaper .titlebar {

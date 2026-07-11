@@ -1,0 +1,7 @@
+// 哨兵文件，让 Prettier 跳过这些路径（构建产物/依赖等）
+dist
+node_modules
+src-tauri/target
+src-tauri/gen
+pnpm-lock.yaml
+package-lock.json

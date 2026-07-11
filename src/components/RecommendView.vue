@@ -224,20 +224,19 @@ async function loadData() {
       log.info("recommend-view", "daily songs loaded", { count: dailyRecommendSongs.value.length });
     } catch (e) { log.warn("recommend-view", "load daily songs failed", { error: String(e) }); }
 
-    // 推荐资源（/recommend/resource）—— 返回推荐歌曲列表
+    // 推荐资源（/recommend/resource）—— 返回推荐歌单列表
+    // 私人漫游：从第一个推荐歌单获取歌曲
     try {
       const res = await recommendResource();
-      const recList = res.recommend || res.data || [];
-      // /recommend/resource 返回的是歌曲数组
-      personalRoamSongs.value = recList.slice(0, 30).map((s: any) => neteaseSongToSong({
-        id: s.id,
-        name: s.name,
-        ar: s.artists || s.ar,
-        al: s.album || s.al,
-        dt: s.duration || s.dt,
-        picUrl: s.picUrl,
-      } as any));
-      log.info("recommend-view", "recommend resource loaded", { count: personalRoamSongs.value.length });
+      const recPlaylists = res.recommend || res.data || [];
+      log.info("recommend-view", "recommend resource loaded", { count: recPlaylists.length, firstPl: recPlaylists[0]?.name });
+      if (recPlaylists.length > 0 && recPlaylists[0].id) {
+        const firstPl = recPlaylists[0];
+        const { playlistTrackAll } = await import("@/api/netease");
+        const detail = await playlistTrackAll(firstPl.id, 0, 30);
+        personalRoamSongs.value = (detail.songs || []).map(neteaseSongToSong);
+        log.info("recommend-view", "personal roam songs loaded from first playlist", { plName: firstPl.name, count: personalRoamSongs.value.length });
+      }
     } catch (e) { log.warn("recommend-view", "load recommend resource failed", { error: String(e) }); }
   }
 
@@ -351,10 +350,6 @@ async function playPersonalRadarPlaylist() {
 
 function playSong(song: Song) {
   store.playNow(song);
-}
-
-function playAll(songs: Song[], idx = 0) {
-  if (songs.length > 0) store.playList(songs, idx);
 }
 
 function openPlaylist(pl: NeteasePlaylist) {

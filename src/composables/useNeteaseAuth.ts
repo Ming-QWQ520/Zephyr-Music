@@ -4,7 +4,6 @@
  * 管理登录状态、二维码登录流程、手机/邮箱登录、退出登录。
  */
 import { ref } from "vue";
-import { log } from "@/composables/logger";
 import {
   getCookie, getCachedUser, logout, setCookie,
   qrKey, qrCreate, qrCheck, _cachedUser,

@@ -8,14 +8,13 @@
  *  - 字体缩放
  *  - 侧边栏透明
  */
-import { ref, onMounted } from "vue";
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
 import { useHomeSettings } from "@/composables/useHomeSettings";
 import { useToast } from "@/composables/useToast";
 const toast = useToast();
 
-const props = withDefaults(defineProps<{
+withDefaults(defineProps<{
   visible: boolean;
 }>(), {
   visible: false,
@@ -93,12 +92,11 @@ function useUrlWallpaper() {
 </script>
 
 <template>
-  <Transition name="home-panel">
-    <section v-if="visible" class="home-settings-overlay" @click.self="emit('close')">
+  <section class="home-settings-view">
       <div class="home-settings-card">
         <header class="hs-head">
           <div class="hs-title">
-            <Icon name="settings" :size="18" />
+            <img src="/icons/settings.svg" alt="settings" class="hs-title-icon" />
             <h2>首页设置</h2>
           </div>
           <button class="hs-close" title="关闭" @click="emit('close')">
@@ -220,21 +218,21 @@ function useUrlWallpaper() {
         </div>
       </div>
     </section>
-  </Transition>
 </template>
 
 <style scoped>
-.home-settings-overlay {
-  position: fixed; inset: 0; z-index: 900;
-  background: rgba(0,0,0,0.4); backdrop-filter: blur(6px);
-  display: flex; align-items: stretch; justify-content: stretch;
+.home-settings-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .home-settings-card {
-  width: 100%; max-width: 100%; height: 100%; max-height: 100%;
-  background: var(--bg-elev-3); border: none; border-radius: 0;
-  box-shadow: none;
+  flex: 1;
+  background: var(--bg);
   display: flex; flex-direction: column; overflow: hidden;
 }
+.hs-title-icon { width: 18px; height: 18px; }
 .hs-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px; border-bottom: 1px solid var(--border);
@@ -302,9 +300,12 @@ function useUrlWallpaper() {
 .hs-btn.full { width: 100%; justify-content: center; }
 
 .hs-footer-hint { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-tertiary); padding-top: 8px; border-top: 1px solid var(--border); }
+</style>
 
-.home-panel-enter-active, .home-panel-leave-active { transition: opacity 0.18s; }
-.home-panel-enter-active .home-settings-card, .home-panel-leave-active .home-settings-card { transition: transform 0.18s, opacity 0.18s; }
-.home-panel-enter-from, .home-panel-leave-to { opacity: 0; }
-.home-panel-enter-from .home-settings-card, .home-panel-leave-to .home-settings-card { transform: scale(0.96); opacity: 0; }
+<style>
+body.has-wallpaper .home-settings-view .home-settings-card {
+  background: rgba(33, 31, 38, 0.55);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+}
 </style>

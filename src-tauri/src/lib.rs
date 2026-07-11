@@ -45,13 +45,68 @@ fn wl(app: &tauri::AppHandle, msg: &str) {
 
 #[tauri::command]
 fn init_log(app: tauri::AppHandle) -> Result<String, String> {
-    let d = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .ok_or("no dir")?
-        .to_path_buf();
-    let ld = d.join("log");
+    // 优先使用 appDataDir 作为日志目录（Tauri 推荐的持久化目录），
+    // 失败时回退到 exe 同级目录下的 log 子目录。
+    let ld = match app.path().app_data_dir() {
+        Ok(d) => d.join("log"),
+        Err(_) => {
+            let d = std::env::current_exe()
+                .map_err(|e| e.to_string())?
+                .parent()
+                .ok_or("no dir")?
+                .to_path_buf();
+            d.join("log")
+        }
+    };
     fs::create_dir_all(&ld).map_err(|e| e.to_string())?;
+
+    // 日志轮转：清理超 5MB 的旧日志，最多保留 5 个。
+    // 注：当前进程刚启动，新日志文件尚未创建，因此无需排除任何文件。
+    if let Ok(entries) = fs::read_dir(&ld) {
+        let mut logs: Vec<(std::path::PathBuf, std::time::SystemTime, u64)> = entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let p = e.path();
+                if p.extension().and_then(|s| s.to_str()) != Some("log") {
+                    return None;
+                }
+                let meta = fs::metadata(&p).ok()?;
+                let size = meta.len();
+                // 修改时间，无法获取则用 UNIX_EPOCH
+                let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                Some((p, mtime, size))
+            })
+            .collect();
+        // 按修改时间倒序（最新的在前）
+        logs.sort_by(|a, b| b.1.cmp(&a.1));
+        // 删除超过 5MB 的旧日志
+        for (p, _, size) in &logs {
+            if *size > 5 * 1024 * 1024 {
+                let _ = fs::remove_file(p);
+            }
+        }
+        // 最多保留 5 个（按时间排序后，跳过前 5 个，删除其余）
+        // 重新读取一次列表，因为上一步可能已经删除了一些
+        if let Ok(entries2) = fs::read_dir(&ld) {
+            let mut remaining: Vec<(std::path::PathBuf, std::time::SystemTime)> = entries2
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().and_then(|s| s.to_str()) != Some("log") {
+                        return None;
+                    }
+                    let meta = fs::metadata(&p).ok()?;
+                    let mtime = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+                    Some((p, mtime))
+                })
+                .collect();
+            remaining.sort_by(|a, b| b.1.cmp(&a.1));
+            for (p, _) in remaining.into_iter().skip(5) {
+                let _ = fs::remove_file(p);
+            }
+        }
+    }
+
     let ts = Local::now().format("%y%m%d%H%M%S").to_string();
     let lp = ld.join(format!("{}.log", ts));
     let lps = lp.to_string_lossy().to_string();
@@ -64,7 +119,10 @@ fn init_log(app: tauri::AppHandle) -> Result<String, String> {
         ),
     )
     .map_err(|e| e.to_string())?;
-    *app.state::<LogFile>().0.lock().unwrap() = Some(lps.clone());
+    // 优雅处理 Mutex poison：避免在异常情况下 panic 整个进程
+    if let Ok(mut guard) = app.state::<LogFile>().0.lock() {
+        *guard = Some(lps.clone());
+    }
     Ok(lps)
 }
 
@@ -167,11 +225,6 @@ fn rodio_position(app: tauri::AppHandle) -> Result<f64, String> {
 }
 
 #[tauri::command]
-fn rodio_duration(_app: tauri::AppHandle) -> Result<f64, String> {
-    Ok(0.0)
-}
-
-#[tauri::command]
 fn rodio_set_volume(app: tauri::AppHandle, volume: f32) -> Result<(), String> {
     let st = app.state::<Arc<Mutex<AudioState>>>();
     let mut s = st.lock().map_err(|e| e.to_string())?;
@@ -234,7 +287,6 @@ pub fn run() {
             rodio_pause,
             rodio_resume,
             rodio_position,
-            rodio_duration,
             rodio_set_volume,
             rodio_is_playing,
             rodio_stop,

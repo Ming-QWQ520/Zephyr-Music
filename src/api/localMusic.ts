@@ -3,8 +3,6 @@ import { log } from "@/composables/logger";
 import type { Song } from "@/types";
 import { searchSongs, fetchLyrics, parseLrc } from "@/api/music";
 
-const API_BASE = "https://api.qijieya.cn/meting/";
-
 /**
  * Build the localaudio:/// URL that the Rodio backend understands.
  * The path is encodeURIComponent'd so spaces / unicode survive transport.

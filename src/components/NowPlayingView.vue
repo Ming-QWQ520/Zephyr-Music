@@ -8,8 +8,8 @@ import { useToast } from "@/composables/useToast";
 import { likeSong, getCachedLikeList, addLikeCache, removeLikeCache } from "@/api/netease";
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
-import SettingsPanel, { useSettings } from "@/components/SettingsPanel.vue";
-import type { LyricLine } from "@/types";
+import SettingsPanel from "@/components/SettingsPanel.vue";
+import { useSettings } from "@/composables/useSettings";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
@@ -459,7 +459,6 @@ const parsedLyrics = computed<ParsedLyric[]>(() => {
       const yl = yrcLines.value[i];
       const next = yrcLines.value[i + 1];
       const gap = next ? next.startTime - yl.startTime : 0;
-      const isInterlude = !yl.text || gap > 8;
       // 精确匹配 yrc 时间戳，回退到最近 3 秒内的行
       let translation = transMap.get(Math.round(yl.startTime * 100));
       if (!translation) {
@@ -491,7 +490,6 @@ const parsedLyrics = computed<ParsedLyric[]>(() => {
     const next = src[i + 1];
     const parsed = parseLyricLine(cur.text);
     const gap = next ? next.time - cur.time : 0;
-    const isInterlude = !parsed.text || gap > 8;
     out.push({
       time: cur.time,
       text: parsed.text || (gap > 8 ? "♪" : ""),
@@ -506,26 +504,8 @@ const parsedLyrics = computed<ParsedLyric[]>(() => {
 
 // Compute interlude gaps to collapse: each parsed lyric gets a "yOffset"
 // that compresses large time gaps to a max visual gap.
-const INTERLUDE_THRESHOLD = 6; // seconds
-const MAX_INTERLUDE_PX = 0; // interludes collapse to 0 height
 
 const activeIndex = computed(() => store.activeLyricIndex);
-
-// 逐字歌词：计算当前活动行已唱进度
-// 使用 requestAnimationFrame + 直接读取 <audio>.currentTime 实现真正逐帧平滑
-const sungWordCount = computed(() => {
-  const idx = activeIndex.value;
-  if (idx < 0) return 0;
-  const line = parsedLyrics.value[idx];
-  if (!line || !line.words) return 0;
-  const t = store.currentTime;
-  let count = 0;
-  for (const w of line.words) {
-    if (t >= w.start) count++;
-    else break;
-  }
-  return count;
-});
 
 /** 每个单词的擦除进度数组 (0~1)，rAF 逐帧更新 - 用于逐字渲染（按单词整体擦除） */
 const wordProgress = ref<number[]>([]);
@@ -677,12 +657,6 @@ onMounted(() => {
 onUnmounted(() => { lineRO?.disconnect(); if (lineHeightRAF) cancelAnimationFrame(lineHeightRAF); if (userScrollTimer) clearTimeout(userScrollTimer); });
 
 // Each line's distance (in number of lines) from active, with interlude gaps collapsed.
-function lineDistance(idx: number): number {
-  // 歌词选择模式下使用冻结的 activeIndex，停止自动滚动
-  const active = lyricSelectMode.value ? frozenActiveIndex.value : activeIndex.value;
-  if (active < 0) return idx;
-  return idx - active;
-}
 
 // RNP-style transform computation:
 // Each line gets an absolute "top" position in px.
@@ -890,7 +864,6 @@ function lineStyle(idx: number): CSSProperties {
   const t = allTransforms.value[idx];
   if (!t) return {};
   const isActive = idx === activeIndex.value;
-  const isHovered = idx === hoveredLine.value;
   const inSelectMode = lyricSelectMode.value;
   // Uniform font size across active/inactive lines. Visual differentiation
   // between active and inactive is done via the `scale` transform (active=1,
@@ -1024,7 +997,6 @@ function onVolWheel(e: WheelEvent) {
 
 // ----- Progress -----
 const progressFrac = computed(() => store.progress);
-const bufferedFrac = computed(() => store.bufferedFrac);
 function onSeek(f: number) { store.seekByFraction(f); }
 
 // 音质选择
@@ -1097,7 +1069,7 @@ let longPressTimer: ReturnType<typeof setTimeout> | null = null;
 const translateBtnVisible = ref(false);
 
 /** 右键歌词进入选择模式 */
-function onLyricContextMenu(idx: number, e: MouseEvent) {
+function onLyricContextMenu(_idx: number, e: MouseEvent) {
   if (lyricSelectMode.value) return;
   e.preventDefault();
   e.stopPropagation();
@@ -1105,7 +1077,7 @@ function onLyricContextMenu(idx: number, e: MouseEvent) {
 }
 
 /** 移动端：长按歌词 500ms 进入选择模式 */
-function onLyricTouchStart(idx: number, e: TouchEvent | MouseEvent) {
+function onLyricTouchStart(_idx: number, e: TouchEvent | MouseEvent) {
   if (lyricSelectMode.value) return;
   if (e instanceof MouseEvent) return;
   longPressTimer = setTimeout(() => {

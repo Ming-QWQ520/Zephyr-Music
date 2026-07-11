@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { useSettings } from "@/components/SettingsPanel.vue";
+import { useSettings } from "@/composables/useSettings";
 import { formatTime } from "@/composables/utils";
-import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew, commentAction, type NewComment } from "@/api/netease";
+import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew } from "@/api/netease";
 import { apiGet } from "@/api/netease/core";
 import { neteaseSongToSong } from "@/api/netease";
 import type { Song } from "@/types";
@@ -57,19 +57,7 @@ watch(() => _cachedUser.value, async (user) => {
 
 // ===== 歌曲评论弹窗 =====
 const showCommentsPopup = ref(false);
-const songComments = ref<NewComment[]>([]);
 const commentCount = ref(0);
-const commentSortType = ref<1 | 2 | 3>(1); // 默认按推荐排序
-const commentLoading = ref(false);
-const commentPageNo = ref(1);
-const commentCursor = ref<number | undefined>(undefined);
-const commentHasMore = ref(false);
-const SORT_LABELS: Record<1 | 2 | 3, string> = { 1: "推荐", 2: "热度", 3: "时间" };
-
-// 发送/回复/删除评论
-const commentInput = ref("");
-const replyTo = ref<NewComment | null>(null); // 回复目标评论
-const sendingComment = ref(false);
 
 /** 格式化评论数量为 k/w/m */
 function formatCommentCount(n: number): string {
@@ -106,104 +94,6 @@ async function openCommentsPopup() {
   if (!song || song.source !== "netease" || !song.neteaseId) return;
   // 在主内容区域显示评论视图（不覆盖侧边栏和播放栏）
   store.setView("songcomments");
-}
-
-async function loadComments(reset = false) {
-  const song = store.currentSong;
-  if (!song || !song.neteaseId) return;
-  if (commentLoading.value) return;
-  if (reset) {
-    songComments.value = [];
-    commentPageNo.value = 1;
-    commentCursor.value = undefined;
-    commentCount.value = 0;
-  }
-  commentLoading.value = true;
-  try {
-    const res = await commentNew(
-      song.neteaseId, 0, commentSortType.value,
-      commentPageNo.value, 20, commentCursor.value
-    );
-    if (reset) songComments.value = res.comments || [];
-    else songComments.value.push(...(res.comments || []));
-    commentCount.value = res.totalCount || 0;
-    commentHasMore.value = !!res.hasMore;
-    commentCursor.value = res.cursor;
-    if (commentHasMore.value) commentPageNo.value += 1;
-  } catch (e) {
-    log.warn("player", "load comments failed", { error: String(e) });
-  }
-  commentLoading.value = false;
-}
-
-async function switchCommentSort(sort: 1 | 2 | 3) {
-  if (commentSortType.value === sort) return;
-  commentSortType.value = sort;
-  await loadComments(true);
-}
-
-function onCommentsScroll(e: Event) {
-  const el = e.target as HTMLElement;
-  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 50 && commentHasMore.value && !commentLoading.value) {
-    loadComments(false);
-  }
-}
-
-/** 发送评论（或回复） */
-async function sendComment() {
-  const song = store.currentSong;
-  if (!song || !song.neteaseId || !commentInput.value.trim()) return;
-  sendingComment.value = true;
-  try {
-    const t = replyTo.value ? 2 : 1; // 1=发送, 2=回复
-    const commentId = replyTo.value?.commentId;
-    const res = await commentAction(t, 0, song.neteaseId, commentInput.value.trim(), commentId);
-    if (res.code === 200) {
-      commentInput.value = "";
-      replyTo.value = null;
-      // 重新加载评论
-      await loadComments(true);
-    } else {
-      // 显示错误提示
-      let errMsg = `发送失败 (${res.code})`;
-      if (res.code === 301 || res.code === 302) errMsg = "需要登录";
-      else if (res.code === 250) errMsg = "风控限制：网易云要求切换至移动端，当前 API 服务端不支持，请在网易云 App 中评论";
-      else if (res.msg) errMsg = res.msg;
-      else if (res.message) errMsg = res.message;
-      log.warn("player", "send comment failed", { code: res.code, msg: res.msg, message: res.message });
-      alert(errMsg);
-    }
-  } catch (e) {
-    log.warn("player", "send comment failed", { error: String(e) });
-    alert("发送评论失败: " + String(e));
-  }
-  sendingComment.value = false;
-}
-
-/** 设置回复目标 */
-function setReplyTo(comment: NewComment) {
-  replyTo.value = comment;
-}
-
-/** 取消回复 */
-function cancelReply() {
-  replyTo.value = null;
-}
-
-/** 删除评论 */
-async function deleteComment(comment: NewComment) {
-  const song = store.currentSong;
-  if (!song || !song.neteaseId) return;
-  try {
-    const res = await commentAction(0, 0, song.neteaseId, undefined, comment.commentId);
-    if (res.code === 200) {
-      // 从列表移除
-      songComments.value = songComments.value.filter(c => c.commentId !== comment.commentId);
-      commentCount.value = Math.max(0, commentCount.value - 1);
-    }
-  } catch (e) {
-    log.warn("player", "delete comment failed", { error: String(e) });
-  }
 }
 
 type PlayMode = "sequence" | "list" | "single" | "shuffle";

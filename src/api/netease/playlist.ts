@@ -97,6 +97,9 @@ export async function playlistUpdatePlaycount(id: number): Promise<{ code: numbe
 
 // ===== 带缓存的用户/歌单获取（避免风控）=====
 
+/** 歌单请求的共享 Promise（用于避免并发重复请求，替代 while 轮询） */
+let _playlistsPromise: Promise<NeteasePlaylist[]> | null = null;
+
 /** 获取用户信息（带缓存） */
 export async function getCachedUser(): Promise<NeteaseUser | null> {
   if (_cachedUser.value) {
@@ -133,33 +136,40 @@ export async function getCachedUser(): Promise<NeteaseUser | null> {
   return null;
 }
 
-/** 获取用户歌单（带缓存） */
+/** 获取用户歌单（带缓存）。
+ *  使用 Promise 共享：并发调用时只有一个真实请求在飞，所有调用者拿到同一个 Promise。 */
 export async function getCachedPlaylists(): Promise<NeteasePlaylist[]> {
   if (_cachedPlaylists.value.length > 0) {
     log.info(TAG, "getCachedPlaylists (cache hit)", { count: _cachedPlaylists.value.length });
     return _cachedPlaylists.value;
   }
-  if (_playlistsLoading.value) {
-    log.info(TAG, "getCachedPlaylists: waiting for in-flight request");
-    while (_playlistsLoading.value) await new Promise(r => setTimeout(r, 100));
-    return _cachedPlaylists.value;
+  // 已有请求在飞：直接复用，不再 polling
+  if (_playlistsPromise) {
+    log.info(TAG, "getCachedPlaylists: sharing in-flight request");
+    return _playlistsPromise;
   }
-  const user = await getCachedUser();
-  if (!user) {
-    log.info(TAG, "getCachedPlaylists: no user, returning []");
-    return [];
-  }
-  _playlistsLoading.value = true;
-  try {
-    const res = await userPlaylist(user.userId);
-    _cachedPlaylists.value = res.playlist || [];
-    log.info(TAG, "getCachedPlaylists (fetched)", { count: _cachedPlaylists.value.length });
-  } catch (e) {
-    log.warn(TAG, "getCachedPlaylists error", { error: String(e) });
-    _cachedPlaylists.value = [];
-  }
-  _playlistsLoading.value = false;
-  return _cachedPlaylists.value;
+  _playlistsPromise = (async () => {
+    _playlistsLoading.value = true;
+    try {
+      const user = await getCachedUser();
+      if (!user) {
+        log.info(TAG, "getCachedPlaylists: no user, returning []");
+        return [];
+      }
+      const res = await userPlaylist(user.userId);
+      _cachedPlaylists.value = res.playlist || [];
+      log.info(TAG, "getCachedPlaylists (fetched)", { count: _cachedPlaylists.value.length });
+      return _cachedPlaylists.value;
+    } catch (e) {
+      log.warn(TAG, "getCachedPlaylists error", { error: String(e) });
+      _cachedPlaylists.value = [];
+      return _cachedPlaylists.value;
+    } finally {
+      _playlistsLoading.value = false;
+      _playlistsPromise = null;
+    }
+  })();
+  return _playlistsPromise;
 }
 
 export { _cachedUser, _cachedPlaylists } from "./core";

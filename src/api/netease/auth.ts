@@ -1,15 +1,8 @@
 /** 网易云登录 / 认证相关 API */
 import { log } from "@/composables/logger";
-import { apiGet, TAG, getCookie, setCookie, clearCookie, _cachedUser, _cachedPlaylists, _playlistsLoading } from "./core";
+import { apiGet, apiPost, TAG, getCookie, setCookie, clearCookie, _cachedUser, _cachedPlaylists, _playlistsLoading } from "./core";
 import { clearLikeCache } from "./like";
-
-function truncateForLog(obj: any, maxLen = 500): string {
-  try {
-    const s = typeof obj === "string" ? obj : JSON.stringify(obj);
-    if (!s) return String(s);
-    return s.length > maxLen ? s.slice(0, maxLen) + `...(truncated, total ${s.length} chars)` : s;
-  } catch { return String(obj); }
-}
+import { truncateForLog } from "@/utils/format";
 
 /** 生成二维码 key */
 export async function qrKey(): Promise<{ code: number; unikey: string }> {
@@ -48,7 +41,7 @@ export async function loginCellphone(params: {
   if (params.countrycode) p.countrycode = params.countrycode;
   if (params.captcha) p.captcha = params.captcha;
   log.info("netease-api-login", "→ loginCellphone()", { phone: params.phone, hasPassword: !!params.password, hasCaptcha: !!params.captcha });
-  const r = await apiGet("/login/cellphone", p);
+  const r = await apiPost("/login/cellphone", p);
   log.info("netease-api-login", "← loginCellphone result", {
     code: r.code, hasProfile: !!r.profile, hasCookie: !!r.cookie,
     cookiePreview: r.cookie ? r.cookie.slice(0, 80) : "",
@@ -59,7 +52,7 @@ export async function loginCellphone(params: {
 /** 邮箱登录（/login） */
 export async function loginEmail(email: string, password: string): Promise<{ code: number; cookie?: string; profile?: any; account?: any }> {
   log.info("netease-api-login", "→ loginEmail()", { email });
-  const r = await apiGet("/login", { email, password });
+  const r = await apiPost("/login", { email, password });
   log.info("netease-api-login", "← loginEmail result", {
     code: r.code, hasProfile: !!r.profile, hasCookie: !!r.cookie,
     cookiePreview: r.cookie ? r.cookie.slice(0, 80) : "",

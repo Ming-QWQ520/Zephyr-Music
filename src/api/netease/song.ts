@@ -1,6 +1,7 @@
 /** 网易云歌曲 URL / 详情 / 打卡 / 听歌记录 API */
 import { log } from "@/composables/logger";
 import { apiGet, TAG } from "./core";
+import { truncateForLog } from "@/utils/format";
 import type { NeteaseSong } from "@/types";
 
 /** 获取音乐 URL */
@@ -122,13 +123,6 @@ export async function userRecord(uid: number, type: 0 | 1 = 1): Promise<{
 }> {
   log.info(TAG, "userRecord()", { uid, type });
   const r = await apiGet("/user/record", { uid, type });
-  function truncateForLog(obj: any, maxLen = 500): string {
-    try {
-      const s = typeof obj === "string" ? obj : JSON.stringify(obj);
-      if (!s) return String(s);
-      return s.length > maxLen ? s.slice(0, maxLen) + `...(truncated, total ${s.length} chars)` : s;
-    } catch { return String(obj); }
-  }
   log.info(TAG, "userRecord result", {
     code: r.code, weekDataCount: r.weekData?.length || 0, allDataCount: r.allData?.length || 0,
     weekDataFirst: r.weekData?.[0] ? { playCount: r.weekData[0].playCount, songId: r.weekData[0].song?.id, songName: r.weekData[0].song?.name } : null,

@@ -3,13 +3,14 @@
  *
  * - API_BASE / COOKIE_KEY 常量
  * - cookie 读写
- * - apiGet 通用请求（自动解包 api-enhanced 的 data 层）
+ * - apiGet/apiPost 通用请求（自动解包 api-enhanced 的 data 层）
  * - 共享缓存状态（_cachedUser / _cachedPlaylists）
  *
  * 本模块仅作为 netease/ 子模块的内部依赖，不直接对外暴露。
  */
 import { ref } from "vue";
 import { log } from "@/composables/logger";
+import { truncateForLog } from "@/utils/format";
 import type { NeteasePlaylist, NeteaseUser } from "@/types";
 
 /** 网易云 API 基础地址（api-enhanced 服务） */
@@ -32,13 +33,14 @@ export function clearCookie(): void {
   try { localStorage.removeItem(COOKIE_KEY); } catch { /* ignore */ }
 }
 
-/** 安全地截断长字符串用于日志输出 */
-function truncateForLog(obj: any, maxLen = 500): string {
-  try {
-    const s = typeof obj === "string" ? obj : JSON.stringify(obj);
-    if (!s) return String(s);
-    return s.length > maxLen ? s.slice(0, maxLen) + `...(truncated, total ${s.length} chars)` : s;
-  } catch { return String(obj); }
+/**
+ * 基本参数清洗：去除 ASCII 控制字符（0x00-0x1F、0x7F）。
+ * 防止参数值中出现换行/控制符导致请求头注入或 URL 异常。
+ * 保留所有可见字符（含中文、空格等）。
+ */
+export function sanitizeParam(v: string): string {
+  // eslint-disable-next-line no-control-regex
+  return v.replace(/[\x00-\x1F\x7F]/g, "");
 }
 
 /**
@@ -51,9 +53,9 @@ function truncateForLog(obj: any, maxLen = 500): string {
  */
 export async function apiGet<T = any>(path: string, params: Record<string, string | number | boolean> = {}): Promise<T> {
   const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) qs.set(k, String(v));
+  for (const [k, v] of Object.entries(params)) qs.set(k, sanitizeParam(String(v)));
   const cookie = getCookie();
-  if (cookie) qs.set("cookie", cookie);
+  if (cookie) qs.set("cookie", sanitizeParam(cookie));
   qs.set("timestamp", String(Date.now()));
   qs.set("randomCNIP", "true");
   const url = `${API_BASE}${path}?${qs.toString()}`;
@@ -98,9 +100,9 @@ export async function apiGet<T = any>(path: string, params: Record<string, strin
  */
 export async function apiPost<T = any>(path: string, params: Record<string, string | number | boolean> = {}): Promise<T> {
   const body = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) body.set(k, String(v));
+  for (const [k, v] of Object.entries(params)) body.set(k, sanitizeParam(String(v)));
   const cookie = getCookie();
-  if (cookie) body.set("cookie", cookie);
+  if (cookie) body.set("cookie", sanitizeParam(cookie));
   body.set("timestamp", String(Date.now()));
   body.set("randomCNIP", "true");
   const url = `${API_BASE}${path}`;

@@ -1,9 +1,9 @@
 import { defineStore } from "pinia";
 import type { Song, LyricLine, RepeatMode, ViewKey } from "@/types";
 import { fetchLyrics } from "@/api/music";
-import { songUrlV1 as songUrl, lyricNew, lyric, parseYrc, type NeteaseSong, type AudioLevel } from "@/api/netease";
+import { songUrlV1 as songUrl, lyricNew, lyric, parseYrc } from "@/api/netease";
 import { log } from "@/composables/logger";
-import { useSettings } from "@/components/SettingsPanel.vue";
+import { useSettings } from "@/composables/useSettings";
 
 const SESSION_KEY = "zephyr-session";
 
@@ -422,10 +422,16 @@ export const usePlayerStore = defineStore("player", {
       this.history.unshift(song);
       if (this.history.length > 50) this.history.length = 50;
     },
-    /** 保存当前会话到 localStorage（播放队列、进度、音量） */
+    /** 保存当前会话到 localStorage（播放队列、进度、音量）。
+     *  排除歌词相关字段（lrc / yrcText / tlyricText），避免持久化大量歌词文本。
+     *  歌词会在恢复播放后由 _ensureNeteaseLyrics 重新获取。 */
     saveSession() {
+      const slimQueue = this.queue.map((s) => {
+        const { lrc: _lrc, yrcText: _y, tlyricText: _t, ...rest } = s;
+        return rest as Song;
+      });
       saveSession({
-        queue: this.queue,
+        queue: slimQueue,
         currentIndex: this.currentIndex,
         currentTime: this.currentTime,
         volume: this.volume,

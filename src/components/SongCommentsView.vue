@@ -2,7 +2,7 @@
 /**
  * 歌曲评论视图（在主内容区域内显示，不覆盖侧边栏和播放栏）
  */
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { commentNew, commentAction, commentLike, type NewComment } from "@/api/netease";
 import { log } from "@/composables/logger";

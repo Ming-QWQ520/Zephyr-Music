@@ -76,21 +76,6 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     }
   }
 
-  /** 用 store.currentTime 精确校准累计时长（每次 timeUpdate 时调用） */
-  function syncAccumulatedTime() {
-    if (!scrobbleInfo || !scrobbleInfo.ticking) return;
-    // 用 store.currentTime 作为当前播放位置
-    // accumulatedTime 直接使用 store.currentTime（这是最准确的）
-    // 但要处理 seek（跳转）的情况：如果 currentTime 比 accumulatedTime 小很多，说明用户 seek 了
-    const ct = store.currentTime;
-    if (ct >= 0 && isFinite(ct)) {
-      // 用 currentTime 作为实际播放位置
-      // 取 max(accumulatedTime, ct) 避免 seek 倒退导致时长减少
-      // 但如果 seek 前进了，也不应该把跳过的部分算作播放时长
-      // 最准确的方式：用增量累计，而非直接用 currentTime
-    }
-  }
-
   /** 上报听歌时长：对当前/上一首歌调用 scrobbleV1（NCBL clientlog PLV/PLD）
    *  仅负责「听歌时长」上报，不负责最近播放。
    *  isAutoNext=true: 完整播放完，上报完整时长（duration）

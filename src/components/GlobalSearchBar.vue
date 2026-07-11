@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from "vue";
+import { ref, watch, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { pickLocalAudioFiles } from "@/api/localMusic";
 import { log } from "@/composables/logger";
+import { debounce } from "@/composables/useDebounce";
 import Icon from "@/components/Icon.vue";
 
 const store = usePlayerStore();
@@ -25,10 +26,24 @@ function onKeydown(ev: KeyboardEvent) {
 
 function commitSearch() {
   if (!keyword.value.trim()) return;
+  // 立即提交：取消挂起的防抖写入，避免延迟覆盖
+  debouncedSetKeyword.cancel();
   store.setSearchKeyword(keyword.value.trim());
   store.setView("search");
   inputRef.value?.blur();
 }
+
+/** 防抖（300ms）实时同步关键词到 store，触发 SearchView 的 watch 执行搜索。
+ *  按 Enter 时跳过防抖立即提交（见 commitSearch）。 */
+const debouncedSetKeyword = debounce((kw: string) => {
+  if (!kw.trim()) return;
+  store.setSearchKeyword(kw.trim());
+  if (store.currentView !== "search") store.setView("search");
+}, 300);
+
+watch(keyword, (kw) => {
+  debouncedSetKeyword(kw);
+});
 
 function handleLocalFiles() {
   pickLocalAudioFiles()
@@ -47,6 +62,7 @@ onMounted(() => {
 });
 onUnmounted(() => {
   document.removeEventListener("keydown", onGlobalKeydown);
+  debouncedSetKeyword.cancel();
 });
 function onGlobalKeydown(ev: KeyboardEvent) {
   if ((ev.ctrlKey || ev.metaKey) && ev.key === "k") {

@@ -159,16 +159,12 @@ async function pickLocal() {
   }
 }
 
-function play(song: Song, index: number) {
+function play(_song: Song, index: number) {
   store.playList(results.value, index);
 }
 
 function add(song: Song) {
   store.addToQueue(song);
-}
-
-function playNext(song: Song) {
-  store.playNext(song);
 }
 
 /** 加载当前列表歌曲的喜欢状态 */

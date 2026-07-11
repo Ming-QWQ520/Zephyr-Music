@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, nextTick, onMounted, watch } from "vue";
+import { computed, ref, nextTick, onMounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import Icon from "@/components/Icon.vue";
 

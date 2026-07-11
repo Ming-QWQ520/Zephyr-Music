@@ -6,8 +6,8 @@ import {
   getCachedUser, getCachedPlaylists,
   neteaseSongToSong, getCookie, _cachedUser,
   likeSong, playlistTracks, getCachedLikeList, addLikeCache, removeLikeCache,
-  playlistDetail, playlistDetailDynamic, commentPlaylist, playlistSubscribers, commentNew, type NewComment,
-  type NeteasePlaylist, type PlaylistComment, type PlaylistSubscriber,
+  playlistDetail, playlistDetailDynamic, playlistSubscribers, commentNew, type NewComment,
+  type NeteasePlaylist, type PlaylistSubscriber,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
@@ -159,15 +159,15 @@ async function loadPersonalRoam() {
   loadingSongs.value = true;
   try {
     const res = await recommendResource();
-    const recList = res.recommend || res.data || [];
-    currentPlaylistSongs.value = recList.slice(0, 30).map((s: any) => neteaseSongToSong({
-      id: s.id,
-      name: s.name,
-      ar: s.artists || s.ar,
-      al: s.album || s.al,
-      dt: s.duration || s.dt,
-      picUrl: s.picUrl,
-    } as any));
+    const recPlaylists = res.recommend || res.data || [];
+    if (recPlaylists.length > 0 && recPlaylists[0].id) {
+      const firstPl = recPlaylists[0];
+      const detail = await playlistTrackAll(firstPl.id, 0, 30);
+      currentPlaylistSongs.value = (detail.songs || []).map(neteaseSongToSong);
+      selectedPlaylistName.value = firstPl.name || "私人漫游";
+    } else {
+      currentPlaylistSongs.value = [];
+    }
     loadSongLikedStatus();
     log.info("netease-view", "personal roam loaded", { count: currentPlaylistSongs.value.length });
   } catch (e) {
@@ -462,7 +462,6 @@ function closeContextMenu() { contextMenu.value.visible = false; showPlayNextSub
 function ctxPlay() { if (contextMenu.value.song) store.playNow(contextMenu.value.song); closeContextMenu(); }
 function ctxPlayNext() { if (contextMenu.value.song) store.playNext(contextMenu.value.song); closeContextMenu(); }
 function ctxPlayLast() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
-function ctxAddToQueue() { if (contextMenu.value.song) store.addToQueue(contextMenu.value.song); closeContextMenu(); }
 
 // 从当前歌单删除歌曲（弹出确认框）
 function ctxRemoveFromPlaylist() {

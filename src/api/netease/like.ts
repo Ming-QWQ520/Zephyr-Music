@@ -44,24 +44,33 @@ export async function songLikeCheck(ids: number[]): Promise<{
 
 // ===== 喜欢列表缓存（延迟导入 getCachedUser 避免循环依赖）=====
 
-/** 刷新喜欢列表缓存（从服务器拉取最新） */
+/** 喜欢列表请求的共享 Promise（替代 while 轮询） */
+let _likeListPromise: Promise<Set<number>> | null = null;
+
+/** 刷新喜欢列表缓存（从服务器拉取最新）。
+ *  使用 Promise 共享：并发调用时只有一个真实请求在飞。 */
 export async function refreshLikeList(uid: number): Promise<Set<number>> {
-  if (_likeListLoading.value) {
-    log.info(TAG, "refreshLikeList: waiting for in-flight request", { uid });
-    while (_likeListLoading.value) await new Promise(r => setTimeout(r, 100));
-    return _cachedLikeSet.value || new Set();
+  if (_likeListPromise) {
+    log.info(TAG, "refreshLikeList: sharing in-flight request", { uid });
+    return _likeListPromise;
   }
-  _likeListLoading.value = true;
-  try {
-    const res = await likeList(uid);
-    _cachedLikeSet.value = new Set(res.ids || []);
-    log.info(TAG, "refreshLikeList done", { uid, count: _cachedLikeSet.value.size });
-  } catch (e) {
-    log.warn(TAG, "refreshLikeList error", { uid, error: String(e) });
-    _cachedLikeSet.value = new Set();
-  }
-  _likeListLoading.value = false;
-  return _cachedLikeSet.value;
+  _likeListPromise = (async () => {
+    _likeListLoading.value = true;
+    try {
+      const res = await likeList(uid);
+      _cachedLikeSet.value = new Set(res.ids || []);
+      log.info(TAG, "refreshLikeList done", { uid, count: _cachedLikeSet.value.size });
+      return _cachedLikeSet.value;
+    } catch (e) {
+      log.warn(TAG, "refreshLikeList error", { uid, error: String(e) });
+      _cachedLikeSet.value = new Set();
+      return _cachedLikeSet.value;
+    } finally {
+      _likeListLoading.value = false;
+      _likeListPromise = null;
+    }
+  })();
+  return _likeListPromise;
 }
 
 /** 获取缓存的喜欢列表（如果未缓存则自动加载） */

@@ -1,14 +1,7 @@
 /** 网易云用户信息 / VIP / 等级 / 听歌足迹 API */
 import { log } from "@/composables/logger";
 import { apiGet } from "./core";
-
-function truncateForLog(obj: any, maxLen = 500): string {
-  try {
-    const s = typeof obj === "string" ? obj : JSON.stringify(obj);
-    if (!s) return String(s);
-    return s.length > maxLen ? s.slice(0, maxLen) + `...(truncated, total ${s.length} chars)` : s;
-  } catch { return String(obj); }
-}
+import { truncateForLog } from "@/utils/format";
 
 /** 获取用户详情（/user/detail?uid=）
  *  返回 signature/createTime/gender/city/province 等完整资料 */
