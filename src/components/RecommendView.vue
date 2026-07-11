@@ -459,16 +459,14 @@ function confirmAddToPlaylist(pl: NeteasePlaylist) {
 
 function onDocClick() { closeContextMenu(); }
 
-// 5分钟缓存：退出播放界面重新进入推荐页时，5分钟内不重复加载
-const RECOMMEND_CACHE_MS = 5 * 60 * 1000;
-let lastRecommendLoadTime = 0;
+// 程序启动时加载一次，之后切换页面不再刷新（退出程序重新进入才刷新）
+let hasLoaded = false;
 
 onMounted(() => {
   document.addEventListener("click", onDocClick);
-  const now = Date.now();
-  if (now - lastRecommendLoadTime > RECOMMEND_CACHE_MS) {
+  if (!hasLoaded) {
     loadData();
-    lastRecommendLoadTime = now;
+    hasLoaded = true;
   }
 });
 onUnmounted(() => { document.removeEventListener("click", onDocClick); });

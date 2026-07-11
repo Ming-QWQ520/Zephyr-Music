@@ -306,7 +306,15 @@ onMounted(async () => {
               </div>
               <div class="row">
                 <div class="label">旋转曲率</div>
-                <Slider class="row-slider" :model-value="settings.rotateCurvature / 50" :format="(v) => `${Math.round(v * 50)}`" @change="(v) => settings.rotateCurvature = Math.round(v * 50)" />
+                <Slider class="row-slider" :model-value="settings.rotateCurvature / 90" :format="(v) => `${Math.round(v * 90)}`" @change="(v) => settings.rotateCurvature = Math.round(v * 90)" />
+              </div>
+              <div v-if="settings.lyricRotate" class="row">
+                <div class="label">旋转歌词大小</div>
+                <Slider class="row-slider" :model-value="(settings.rotateLyricFontSize - 14) / 40" :format="(v) => `${Math.round(14 + v * 40)}px`" @change="(v) => settings.rotateLyricFontSize = Math.round(14 + v * 40)" />
+              </div>
+              <div v-if="settings.lyricRotate" class="row">
+                <div class="label">旋转歌词间距</div>
+                <Slider class="row-slider" :model-value="settings.rotateLyricLineGap / 80" :format="(v) => `${Math.round(v * 80)}px`" @change="(v) => settings.rotateLyricLineGap = Math.round(v * 80)" />
               </div>
               <div class="row">
                 <div class="label">当前行对齐</div>
@@ -385,6 +393,10 @@ onMounted(async () => {
               <div class="row toggle">
                 <div class="label">首页封面旋转</div>
                 <button class="switch" :class="{ on: settings.coverRotation }" @click="settings.coverRotation = !settings.coverRotation" />
+              </div>
+              <div class="row toggle">
+                <div class="label">启动后自动播放</div>
+                <button class="switch" :class="{ on: settings.autoPlayOnStartup }" @click="settings.autoPlayOnStartup = !settings.autoPlayOnStartup" />
               </div>
 
             </section>

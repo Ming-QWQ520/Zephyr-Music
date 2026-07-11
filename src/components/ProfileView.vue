@@ -73,15 +73,22 @@ function onVipIconError() {
 // 是否已发起过听歌排行的请求（避免 neUser 异步加载完成后重复请求）
 let weekRankLoaded = false;
 
+// 3分钟缓存：进入个人主页时，3分钟内不重复加载数据
+const PROFILE_CACHE_MS = 3 * 60 * 1000;
+let lastProfileLoadTime = 0;
+
 // 每次组件挂载（即每次进入个人主页）重置 VIP 图，触发动画图重新请求+播放
 onMounted(() => {
   resetVipIcon();
-  loadPlaylists();
-  loadRecentSongs();
-  // neUser 可能此时已就绪，也可能稍后才异步返回
-  if (neUser.value?.userId) {
-    weekRankLoaded = true;
-    loadWeekRank();
+  const now = Date.now();
+  if (now - lastProfileLoadTime > PROFILE_CACHE_MS) {
+    loadPlaylists();
+    loadRecentSongs();
+    if (neUser.value?.userId) {
+      weekRankLoaded = true;
+      loadWeekRank();
+    }
+    lastProfileLoadTime = now;
   }
 });
 // VIP 信息异步加载完成后再进入主页时也重置一次
@@ -357,6 +364,9 @@ function goBack() {
           <div class="card-title">
             <Icon name="history" :size="14" />
             <span>最近播放</span>
+            <button class="card-refresh-btn" title="刷新" @click="loadRecentSongs">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+            </button>
           </div>
           <div v-if="loadingRecent" class="section-loading"><span class="spinner-sm" /></div>
           <div v-else-if="recentSongs.length" class="song-list">
@@ -387,6 +397,9 @@ function goBack() {
             <Icon name="equalizer" :size="14" />
             <span>听歌排行</span>
             <span class="card-title-sub">本周</span>
+            <button class="card-refresh-btn" title="刷新" @click="loadWeekRank">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+            </button>
           </div>
           <div v-if="loadingRank" class="section-loading"><span class="spinner-sm" /></div>
           <div v-else-if="weekRank.length" class="song-list">
@@ -477,6 +490,17 @@ function goBack() {
   border-radius: var(--radius-sm);
   background: var(--bg-elev-2);
 }
+.card-refresh-btn {
+  margin-left: auto;
+  width: 26px; height: 26px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary);
+  transition: color 0.15s, background 0.15s;
+  cursor: pointer;
+}
+.card-refresh-btn:hover { color: var(--accent); background: var(--accent-soft); }
+.card-refresh-btn:active { transform: scale(0.9); }
 
 /* ===== 用户信息卡片 ===== */
 .user-card {

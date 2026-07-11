@@ -204,6 +204,15 @@ function useUrlWallpaper() {
             </div>
           </section>
 
+          <!-- 播放 -->
+          <section class="hs-section">
+            <h3>播放</h3>
+            <div class="hs-row toggle">
+              <div class="hs-label">启动后自动播放</div>
+              <button class="switch" :class="{ on: settings.autoPlayOnStartup }" @click="settings.autoPlayOnStartup = !settings.autoPlayOnStartup" />
+            </div>
+          </section>
+
           <!-- 重置 -->
           <section class="hs-section">
             <button class="hs-btn danger full" @click="resetAll">

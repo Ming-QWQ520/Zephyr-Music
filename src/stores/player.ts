@@ -121,21 +121,25 @@ export const usePlayerStore = defineStore("player", {
 
     /** 播放歌单。网易云歌曲需要逐个获取 URL（首次播放时懒加载）。 */
     async playList(songs: Song[], start = 0) {
-      this.isPersonalRoam = false; // 播放列表退出私人漫游模式
-      this.queue = [...songs];
-      this.currentIndex = Math.max(0, Math.min(start, songs.length - 1));
-      this.isPlaying = true;
-      const s = this.currentSong;
+      this.isPersonalRoam = false;
+      const idx = Math.max(0, Math.min(start, songs.length - 1));
+      const s = songs[idx];
       if (s) {
-        if (s.source === "netease" && s.neteaseId) {
-          // 并行获取 URL 和歌词，只等待 URL
-          const urlPromise = !s.url ? this._ensureNeteaseUrl(s) : Promise.resolve();
-          const lrcPromise = !s.lrc ? this._ensureNeteaseLyrics(s).then(() => {
-            if (this.currentSong?.id === s.id) this.loadLyrics(s);
-          }) : Promise.resolve();
-          await urlPromise;
-          void lrcPromise;
+        // 先获取 URL，再设置 queue（避免 URL 为空时 watch 清除播放）
+        if (s.source === "netease" && s.neteaseId && !s.url) {
+          await this._ensureNeteaseUrl(s);
         }
+        // 并行获取歌词
+        if (s.source === "netease" && s.neteaseId && !s.lrc) {
+          void this._ensureNeteaseLyrics(s).then(() => {
+            if (this.currentSong?.id === s.id) this.loadLyrics(s);
+          });
+        }
+      }
+      this.queue = [...songs];
+      this.currentIndex = idx;
+      this.isPlaying = true;
+      if (s) {
         this.pushHistory(s);
         if (s.lrc) this.loadLyrics(s);
         else this.lyrics = [];
@@ -274,13 +278,16 @@ export const usePlayerStore = defineStore("player", {
       if (toIdx < 0 || toIdx >= this.queue.length) return;
       if (fromIdx === toIdx) return;
       const [moved] = this.queue.splice(fromIdx, 1);
-      this.queue.splice(toIdx, 0, moved);
+      // 从前往后拖时，移除后 toIdx 已前移一位，需要 -1 才能插入到目标位置前面
+      // 从后往前拖时，toIdx 不变，直接插入
+      const insertIdx = fromIdx < toIdx ? toIdx - 1 : toIdx;
+      this.queue.splice(insertIdx, 0, moved);
       // 调整 currentIndex
       if (fromIdx === this.currentIndex) {
-        this.currentIndex = toIdx;
-      } else if (fromIdx < this.currentIndex && toIdx >= this.currentIndex) {
+        this.currentIndex = insertIdx;
+      } else if (fromIdx < this.currentIndex && insertIdx >= this.currentIndex) {
         this.currentIndex -= 1;
-      } else if (fromIdx > this.currentIndex && toIdx <= this.currentIndex) {
+      } else if (fromIdx > this.currentIndex && insertIdx <= this.currentIndex) {
         this.currentIndex += 1;
       }
     },
@@ -326,21 +333,20 @@ export const usePlayerStore = defineStore("player", {
     },
     async prev() {
       if (this.queue.length === 0) return;
-      if (this.currentTime > 3) { this.currentTime = 0; return; }
+      // 直接切换到上一首，无论当前进度
       if (this.currentIndex > 0) this.currentIndex -= 1;
       else if (this.repeat === "all") this.currentIndex = this.queue.length - 1;
       else { this.currentTime = 0; return; }
       this.isPlaying = true;
       const s = this.currentSong;
       if (s) {
-        if (s.source === "netease" && s.neteaseId) {
-          // 并行获取 URL 和歌词
-          const urlP = !s.url ? this._ensureNeteaseUrl(s) : Promise.resolve();
-          const lrcP = !s.lrc ? this._ensureNeteaseLyrics(s).then(() => {
+        if (s.source === "netease" && s.neteaseId && !s.url) {
+          await this._ensureNeteaseUrl(s);
+        }
+        if (s.source === "netease" && s.neteaseId && !s.lrc) {
+          void this._ensureNeteaseLyrics(s).then(() => {
             if (this.currentSong?.id === s.id) this.loadLyrics(s);
-          }) : Promise.resolve();
-          await urlP;
-          void lrcP;
+          });
         }
         if (s.lrc) this.loadLyrics(s);
         else this.lyrics = [];
@@ -423,13 +429,20 @@ export const usePlayerStore = defineStore("player", {
       if (this.history.length > 50) this.history.length = 50;
     },
     /** 保存当前会话到 localStorage（播放队列、进度、音量）。
-     *  排除歌词相关字段（lrc / yrcText / tlyricText），避免持久化大量歌词文本。
-     *  歌词会在恢复播放后由 _ensureNeteaseLyrics 重新获取。 */
+     *  只保存歌曲 ID、名称、歌手等最小信息，不保存 URL（URL 会过期）。
+     *  恢复时通过 _ensureNeteaseUrl 重新获取 URL。 */
     saveSession() {
-      const slimQueue = this.queue.map((s) => {
-        const { lrc: _lrc, yrcText: _y, tlyricText: _t, ...rest } = s;
-        return rest as Song;
-      });
+      const slimQueue = this.queue.map((s) => ({
+        id: s.id,
+        name: s.name,
+        artist: s.artist,
+        pic: s.pic,
+        source: s.source,
+        neteaseId: s.neteaseId,
+        duration: s.duration,
+        url: "", // 清空 URL，恢复时重新获取
+        lrc: "",
+      }));
       saveSession({
         queue: slimQueue,
         currentIndex: this.currentIndex,

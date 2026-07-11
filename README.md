@@ -2,7 +2,7 @@
 
 > 基于 Tauri 2 + Vue 3 的网易云音乐第三方桌面播放器。
 
-一个现代化的桌面音乐播放器，深度集成网易云音乐生态。采用 NeteaseMusicNext 风格的界面设计，支持浅色/深色主题切换。支持二维码/手机/邮箱登录、歌单同步、逐字歌词（按单词整体擦除）、听歌打卡、喜欢/收藏、评论查看、歌词选择复制、可自定义榜单精选，以及本地音频文件播放。
+一个现代化的桌面音乐播放器，深度集成网易云音乐生态。采用 NeteaseMusicNext 风格的界面设计，支持浅色/深色主题切换。支持二维码/手机/邮箱登录、歌单同步、逐字歌词（按单词整体擦除）、3D 旋转歌词、听歌打卡、喜欢/收藏、评论查看、歌词选择复制、可自定义榜单精选、个人主页、全屏播放界面，以及本地音频文件播放。
 
 ---
 
@@ -14,89 +14,83 @@
 - **黑色"播放全部"按钮**：NeteaseMusicNext 标志性黑色药丸按钮（浅色主题）/ 红色（深色主题）
 - **全屏壁纸**：自定义壁纸应用到所有非播放界面（首页/搜索/歌单/推荐等），播放界面保持独立背景
 - **毛玻璃效果**：有壁纸时主内容区歌曲列表行采用毛玻璃半透明
+- **播放栏玻璃效果**：有壁纸时底部播放栏半透明玻璃效果
+- **禁止拖动图片** + **禁用空格键滚动页面**
 
 ### 🎵 网易云音乐集成
-- **多方式登录**：扫码登录 / 手机号+验证码 / 邮箱登录
+- **多方式登录**：扫码登录 / 手机号+验证码 / 邮箱登录（POST 请求，密码不在 URL 中）
 - **歌单同步**：自动加载用户歌单、每日推荐、听歌排行（最近一周/所有时间）
 - **歌单详情页**：歌曲列表 / 评论（含总数）/ 收藏者（含总数）三个标签页
 - **推荐页**：每日推荐 + 私人漫游 + 私人雷达 + 推荐歌单 + **可自定义榜单精选**
+  - 每日推荐封面用第一首歌封面，子标题显示"每日推荐 | 从[歌名]听起"
+  - 私人雷达子标题显示"私人雷达 | 从[第一首歌名]听起"
+  - 点击卡片进入详情页，播放按钮单独播放
 - **逐字歌词**：yrc 格式**按单词整体擦除**动画（不按字母），支持翻译歌词（tlyric）
+- **3D 旋转歌词**：歌词呈半圆弧形排列，支持旋转曲率调节（0-90）、旋转模式专用字号/间距、滚轮弧形旋转滚动
 - **音质选择**：9 个等级（standard / higher / exhigh / lossless / hires / jyeffect / sky / dolby / jymaster）
-  - **Hi-Res 金色按钮**：音质为 Hi-Res 时播放界面音质按钮变金色渐变 + 光晕
-  - 无损/超清母带等高品质音质时按钮变银白色微光
 - **听歌打卡**：双 API 打卡（`/scrobble/v1` 同步播放时长 + `/scrobble` 记录到最近播放）
 - **喜欢功能**：单曲喜欢/取消，缓存 likelist，列表内快捷切换，已喜欢红心常驻显示
 - **添加到歌单**：右键菜单 / 列表按钮，弹出对话框选择目标歌单
-- **搜索**：支持单曲/专辑/歌手/歌单/用户/MV/歌词/综合多类型筛选
-- **用户信息**：VIP 信息 + 总听歌时长 + 用户等级（含进度条）
+- **搜索**：支持单曲/专辑/歌手/歌单/用户/MV/歌词/综合多类型筛选（300ms 防抖）
+- **用户信息**：VIP 动画图标 + 总听歌时长 + 用户等级（含进度条）
+- **个人主页**：全屏视图，展示用户信息 + 听歌统计 + 我的歌单 + 最近播放 + 听歌排行（3分钟缓存 + 刷新按钮）
 - **歌单管理**：从歌单移除歌曲（确认对话框）
+- **外部链接跳转**：GitHub 仓库 / 项目 Star / 抖音主页（通过 opener 插件调用系统浏览器）
 
 ### 📊 可自定义榜单精选
 - **18 个预设榜单**：飙升榜、新歌榜、热歌榜、抖音排行榜、全球说唱榜、欧美热歌榜、古典榜、电音榜、中文说唱榜、潮流风向榜、音乐合伙人系列（5个）、黑胶VIP爱听榜、ACG榜、韩语榜
 - **自定义歌单 ID 添加**：输入网易云歌单 ID 即可添加（名称自动从 API 获取）
 - **编辑模式**：标题右侧 edit.svg 图标，点击进入编辑模式
-  - 卡片边框变红色 + 显示删除按钮
-  - 编辑模式下显示 +号添加卡片（未满 6 个时）
 - **最多 6 个榜单**，配置持久化到 localStorage
-- **添加对话框**：只能用 close.svg 图标关闭（不能点背景关闭）
-
-### 🎴 统一音乐卡片格式
-所有视图的歌曲行使用统一的操作按钮组，放在「标题」和「艺术家」之间：
-- ❤️ **喜欢** — 已喜欢时常驻红色显示；未喜欢时 hover 行才显示
-- 📁 **添加至歌单** — hover 行才显示
-- ⏭️ **下一首播放**（= 加入队列）— **始终显示**，无论是否 hover、无论是否喜欢
-- **榜单精选例外**：只显示喜欢按钮（空间有限）
+- **hover 三按钮**：喜欢 / 添加至歌单 / 下一首播放（覆盖在卡片最右侧）
 
 ### 🎤 歌词选择模式（像聊天记录多选）
 - **右键歌词进入**选择模式
 - 进入后**停止自动滚动**（冻结当前播放位置，不自动回正）
-- **左键点击**歌词行 → 选中/取消选中（高亮背景切换，无勾选框）
-- 选择模式下：**取消模糊效果**、所有行 scale=1、**扩大歌词间距**（+16px）
+- **左键点击**歌词行 → 选中/取消选中
+- 选择模式下：取消模糊效果、所有行 scale=1、扩大歌词间距
 - 顶部提示条：已选 X 行 + 全选按钮 + 复制按钮 + 退出按钮
-- **复制成功后 Toast 通知**「复制成功 · 已复制 X 行歌词到剪贴板」
-- 复制内容包含歌词原文 + 翻译（如果翻译开启）
-- Esc 或点击「退出」按钮退出选择模式
+- **复制成功后 Toast 通知**
 
 ### 🌐 翻译开关
-- 播放界面**右下角**翻译开关按钮（translate.svg 图标）
-- **默认隐藏**，鼠标进入右下角热区时显示
-- **未开启**：hover 效果跟播放控件一致（10% 白色背景）
-- **开启**：白色高亮背景（22% 白色），图标固定白色
-- 图标颜色始终固定白色
+- 播放界面右下角翻译开关按钮
+- 默认隐藏，鼠标进入右下角热区时显示
 
 ### 播放
 - **本地播放**：通过 Rust Rodio 后端播放本地音频文件（mp3/flac/wav/ogg/m4a/aac/opus）
 - **在线播放**：网易云歌曲动态获取播放 URL
-- **播放模式**：顺序播放 / 列表循环 / 单曲循环 / 随机播放
-- **播放队列**：右侧滑入队列弹窗，支持右键菜单
-- **会话恢复**：播放队列、进度、音量自动保存到 localStorage，**重启后自动恢复播放** + 恢复到上次进度
+- **播放模式**：顺序播放 / 列表循环（默认）/ 单曲循环 / 随机播放
+- **播放队列**：三处播放列表（全屏队列视图 / 首页底部弹窗 / 播放界面面板），支持拖拽排序、复位键
+- **会话恢复**：播放队列只保存歌曲 ID 和名称（不保存 URL），重启后自动获取新 URL，**无需手动清除歌单**
+- **启动后自动播放**：可在设置中开启（默认关闭）
 
-### 全屏播放界面
-- **逐字歌词**：yrc 解析，按单词整体擦除（`background-clip:text` + `box-decoration-break:clone`），rAF 逐帧驱动
-- **翻译歌词**：tlyric 按时间戳匹配，独立存储，右下角一键开关
+### 全屏播放界面（已拆分为子组件）
+- **逐字歌词**：yrc 解析，按单词整体擦除，rAF 逐帧驱动
+- **3D 旋转歌词**：半圆弧形排列，曲率可调（0-90），旋转模式专用字号/间距，滚轮弧形旋转
 - **歌词选择模式**：右键进入，点击选中整行，可复制
 - **歌词 hover**：鼠标悬停行放大+变亮+减模糊
-- **封面展示**：支持矩形/圆形，可调清晰度（200-500p）
-- **音频可视化**：bars/lines/wave 三种样式，accent/white/rainbow/album 四种配色
-- **背景系统**：模糊（专辑封面）/ 流体 / 渐变 / 纯色 / 无（播放界面保持独立背景，不被全局壁纸覆盖）
+- **封面展示**：支持矩形/圆形，可调清晰度，响应式缩放
+- **背景系统**：模糊（专辑封面）/ 流体 / 渐变 / 纯色 / 无
 - **控件自动隐藏**：鼠标静止时控件淡出，移动时恢复
+- **播放列表面板**：从右侧居中弹出，支持拖拽排序 + 复位键
 
-### 首页（独立设置）
-- **全屏壁纸**：自定义本地图片或 URL 作为壁纸，覆盖所有非播放界面
-  - 可调模糊强度、变暗程度、缩放模式（填充/适应）
-  - 侧边栏透明开关（壁纸透出）
+### 首页设置（main-view 内嵌视图，非弹窗）
+- **全屏壁纸**：自定义本地图片或 URL，覆盖所有非播放界面（含标题栏）
+  - 可调模糊强度、变暗程度、缩放模式（填充/适应，均覆盖整个窗口）
+  - 侧边栏透明开关
 - **主题色**：首页独立的主题色配置（8 预设 + 自定义）
 - **字体缩放**：首页内容字体缩放
-- **与播放界面设置完全独立**：两套设置互不影响，各自存储
+- **启动后自动播放**：开关（默认关闭）
+- **与播放界面设置完全独立**
 
 ### 其他
-- **Toast 通知**：右下角弹出，支持标题/副标题/时长/类型/操作链接
+- **Toast 通知**：右下角弹出
 - **返回导航**：基于视图历史栈的返回按钮
-- **全局右键菜单禁用**：自定义右键菜单替代原生（播放界面歌词区除外）
-- **标题栏拖动**：`data-tauri-drag-region` 自定义标题栏
-- **日志系统**：输出到 `exe目录/log/[时间].log`
+- **侧边栏选中效果**：听歌排行/我喜欢的音乐/歌单列表高亮
+- **标题栏拖动**：自定义标题栏
+- **日志系统**：输出到 appDataDir/log/，自动轮转（5MB 清理，最多保留 5 个）
 - **窗口控件**：最小化/最大化/关闭
-- **单文件 .exe**：所有逻辑静态链接进单个可执行文件（无 zephyr_music_lib.dll 依赖）
+- **单文件 .exe**：所有逻辑静态链接进单个可执行文件
 
 ---
 
@@ -107,8 +101,9 @@
 | 框架 | Tauri 2.x |
 | 前端 | Vue 3 + TypeScript + Vite 6 |
 | 状态管理 | Pinia |
-| 后端 | Rust + Rodio (音频) + Lofty (元数据) |
-| 音乐 API | 网易云音乐 api-enhanced 服务 |
+| 后端 | Rust + Rodio (音频) + Lofty (元数据) + Reqwest (HTTP) |
+| 音乐 API | 网易云音乐 api-enhanced 服务 + NCBL 加密 |
+| 外部链接 | tauri-plugin-opener |
 | 包管理器 | pnpm 11.8.0 |
 | 交叉编译 | LLVM-MinGW (Clang 22.1.8, UCRT) |
 
@@ -121,69 +116,70 @@ Zephyr-Music/
 ├── src/                           # Vue 前端源码
 │   ├── api/                       # API 封装
 │   │   ├── netease/               # 网易云 API 模块化
-│   │   │   ├── core.ts            # API 基础请求 + cookie 管理
-│   │   │   ├── auth.ts            # 登录（扫码/手机/邮箱）
+│   │   │   ├── core.ts            # API 基础请求 + cookie 管理 + 输入清洗
+│   │   │   ├── auth.ts            # 登录（扫码/手机/邮箱，POST 请求）
 │   │   │   ├── song.ts            # 歌曲 URL/详情/打卡/记录
-│   │   │   ├── playlist.ts        # 歌单详情/操作
+│   │   │   ├── playlist.ts        # 歌单详情/操作（Promise 共享缓存）
 │   │   │   ├── lyric.ts           # 歌词（yrc/lrc/tlyric）
 │   │   │   ├── search.ts          # 搜索
-│   │   │   ├── like.ts            # 喜欢/likelist
+│   │   │   ├── like.ts            # 喜欢/likelist（Promise 共享缓存）
 │   │   │   ├── comment.ts         # 评论
-│   │   │   ├── user.ts            # 用户信息/等级/VIP
+│   │   │   ├── user.ts            # 用户信息/等级/VIP/详情
 │   │   │   └── transform.ts       # 数据转换
 │   │   ├── netease.ts             # 网易云 API 统一导出
 │   │   ├── music.ts               # 本地音乐元数据
 │   │   └── localMusic.ts          # 本地文件选择
 │   ├── components/                # Vue 组件
-│   │   ├── NowPlayingView.vue     # 全屏播放界面（逐字歌词+可视化+封面+歌词选择模式+翻译开关）
-│   │   ├── PlayerBar.vue          # 底部播放栏（控件+音质+音量+喜欢+队列弹窗）
-│   │   ├── NeteaseView.vue        # 歌单歌曲列表+详情标签页+右键菜单+统一卡片按钮
-│   │   ├── RecommendView.vue      # 推荐页（每日推荐+私人漫游+私人雷达+推荐歌单+可自定义榜单精选）
-│   │   ├── SearchView.vue         # 搜索页（类型筛选+右键菜单+统一卡片按钮）
-│   │   ├── Sidebar.vue            # 侧边栏（推荐/我的/歌单列表）
-│   │   ├── SettingsPanel.vue      # 播放界面设置（外观/封面/背景/歌词/字体/杂项/实验性）
-│   │   ├── HomeSettingsPanel.vue  # 首页设置（壁纸/主题色/字体，独立于播放界面）
-│   │   ├── GlobalSearchBar.vue    # 顶部搜索栏
-│   │   ├── QueueView.vue          # 播放队列弹窗
+│   │   ├── NowPlaying/            # 全屏播放界面子组件（拆分自 NowPlayingView）
+│   │   │   ├── useNowPlaying.ts   # 共享状态 composable
+│   │   │   ├── NpBackground.vue   # 背景层
+│   │   │   ├── NpTopbar.vue       # 顶栏 + 歌词选择提示 + 翻译开关
+│   │   │   ├── NpCoverControls.vue # 封面 + 控制按钮 + 音量/进度/音质
+│   │   │   ├── NpLyrics.vue       # 歌词（解析/渲染/3D旋转/选择模式）
+│   │   │   └── NpQueuePanel.vue   # 播放列表面板（拖拽排序 + 复位键）
+│   │   ├── NowPlayingView.vue     # 全屏播放界面主组件（组合子组件）
+│   │   ├── PlayerBar.vue          # 底部播放栏（控件+音质+音量+喜欢+队列弹窗+拖拽排序）
+│   │   ├── NeteaseView.vue        # 歌单歌曲列表+详情标签页+右键菜单
+│   │   ├── RecommendView.vue      # 推荐页（每日推荐+私人漫游+私人雷达+榜单精选）
+│   │   ├── SearchView.vue         # 搜索页
+│   │   ├── ProfileView.vue        # 个人主页（用户信息+歌单+最近播放+听歌排行）
+│   │   ├── Sidebar.vue            # 侧边栏（推荐/我的/歌单列表+选中效果）
+│   │   ├── SettingsPanel.vue      # 播放界面设置
+│   │   ├── HomeSettingsPanel.vue  # 首页设置（main-view 内嵌视图）
+│   │   ├── GlobalSearchBar.vue    # 顶部搜索栏（300ms 防抖）
+│   │   ├── QueueView.vue          # 播放队列视图（拖拽排序 + 复位键）
 │   │   ├── LibraryView.vue        # 本地音乐库
-│   │   ├── ToastContainer.vue     # Toast 通知容器
-│   │   ├── Slider.vue             # 通用滑块（支持竖向）
-│   │   ├── WindowControls.vue     # 窗口控制按钮
-│   │   └── Icon.vue               # SVG 图标组件（含 sun/moon 等）
+│   │   └── ...
 │   ├── composables/               # 组合式 API
-│   │   ├── useAudioBinding.ts     # 音频绑定（Rodio + audio 双模式 + 听歌打卡 + 重启恢复）
-│   │   ├── useAudioVisualizer.ts  # 音频可视化（模拟频谱）
-│   │   ├── useHomeSettings.ts     # 首页设置（独立 localStorage）
-│   │   ├── useToast.ts            # Toast 通知系统
+│   │   ├── useSettings.ts         # 播放界面设置（提取自 SettingsPanel）
+│   │   ├── useHomeSettings.ts     # 首页设置（含 autoPlayOnStartup）
+│   │   ├── useAudioBinding.ts     # 音频绑定（Rodio + audio 双模式 + 听歌打卡）
+│   │   ├── useDebounce.ts         # 通用防抖
 │   │   ├── useNeteaseAuth.ts      # 网易云登录状态管理
-│   │   ├── useNeteaseUser.ts      # 网易云用户信息（VIP/等级/听歌时长）
-│   │   ├── useWindowControls.ts   # 窗口控制（最小化/最大化/关闭）
-│   │   ├── rodioBridge.ts         # Rodio Tauri 命令封装
-│   │   ├── logger.ts              # 日志（输出到 Rust 文件）
-│   │   └── utils.ts               # 工具函数
-│   ├── stores/player.ts           # Pinia 状态管理（含视图历史栈 + 会话保存/恢复）
+│   │   ├── useNeteaseUser.ts      # 网易云用户信息（VIP/等级/听歌时长/详情）
+│   │   └── ...
+│   ├── stores/player.ts           # Pinia 状态管理（含会话保存/恢复 + 拖拽排序）
 │   ├── types/                     # 类型定义
-│   ├── style.css                  # 全局样式（NeteaseMusicNext 主题 + 浅色/深色）
+│   ├── utils/format.ts            # 工具函数（truncateForLog 统一定义）
+│   ├── style.css                  # 全局样式
 │   ├── nmn-overrides.css          # NeteaseMusicNext UI 覆盖样式
 │   └── main.ts                    # 入口文件
 ├── src-tauri/                     # Rust 后端
-│   ├── src/lib.rs                 # Rodio + 日志 + localaudio 协议
-│   ├── src/main.rs                # 入口（单文件 exe，无 cdylib）
-│   ├── Cargo.toml                 # Rust 依赖（crate-type: staticlib + rlib）
-│   ├── tauri.conf.json            # Tauri 配置（CSP + assetProtocol）
+│   ├── src/lib.rs                 # Rodio + 日志（轮转）+ localaudio 协议
+│   ├── src/netease_report.rs      # NCBL 加密听歌时长上报
+│   ├── src/main.rs                # 入口（单文件 exe）
+│   ├── Cargo.toml                 # Rust 依赖（opt-level 3, codegen-units 1）
+│   ├── tauri.conf.json            # Tauri 配置（CSP + dragDropEnabled false）
+│   ├── capabilities/default.json  # 权限配置
 │   └── .cargo/config.toml         # 交叉编译配置（LLVM-MinGW）
 ├── public/icons/                  # 图标资源
-│   ├── edit.svg                   # 编辑图标（榜单精选）
-│   ├── close.svg                  # 关闭图标（添加榜单对话框）
-│   ├── translate.svg              # 翻译开关图标
-│   ├── like.svg / not_like.svg    # 喜欢/未喜欢图标
-│   ├── add_playlist.svg           # 添加到歌单图标
-│   └── ...
-├── package.json                   # pnpm 11.8.0
-├── pnpm-lock.yaml                 # pnpm 锁文件
-├── pnpm-workspace.yaml            # pnpm 配置
+├── package.json
+├── pnpm-lock.yaml
 ├── vite.config.ts
-└── tsconfig.json
+├── tsconfig.json                  # noUnusedLocals/noUnusedParameters = true
+├── eslint.config.mjs              # ESLint 配置
+├── .prettierrc                    # Prettier 配置
+└── .prettierignore
 ```
 
 ---
@@ -192,7 +188,7 @@ Zephyr-Music/
 
 ### 环境要求
 - [Node.js](https://nodejs.org/) 18+
-- [pnpm](https://pnpm.io/) 11+ （**必须使用 pnpm**，不要用 npm/yarn）
+- [pnpm](https://pnpm.io/) 11+ （**必须使用 pnpm**）
 - [Rust](https://www.rust-lang.org/) (stable)
 - Tauri 2 前置依赖：参见 [Tauri 官方文档](https://tauri.app/start/prerequisites/)
 
@@ -238,21 +234,17 @@ rustflags = [
   "-C", "link-arg=-lwinpthread",
 ]
 
-# 创建 libgcc 兼容符号链接（LLVM-MinGW 用 libunwind 替代 libgcc）
+# 创建 libgcc 兼容符号链接
 cd /path/to/llvm-mingw/x86_64-w64-mingw32/lib/
 ln -sf libunwind.a libgcc.a
 ln -sf libunwind.a libgcc_eh.a
 ln -sf libunwind.a libgcc_s.a
 
-# 设置 include 路径（ring 编译需要）
-export C_INCLUDE_PATH="/path/to/llvm-mingw/generic-w64-mingw32/include"
-export CPLUS_INCLUDE_PATH="$C_INCLUDE_PATH"
-
 # 构建（需 custom-protocol feature 嵌入前端）
 cargo build --release --target x86_64-pc-windows-gnu --features custom-protocol
 ```
 
-产物为单文件 `zephyr-music.exe`（~20MB），无需 `zephyr_music_lib.dll`。
+产物为单文件 `zephyr-music.exe`（~20MB），无需 DLL 依赖。
 
 ---
 
@@ -263,9 +255,10 @@ cargo build --release --target x86_64-pc-windows-gnu --features custom-protocol
 2. **浏览歌单**：左侧侧边栏选择「推荐」查看推荐歌单和榜单，或「我的」查看自己的歌单
 3. **设置壁纸**：点击标题栏设置图标 → 「背景壁纸」→ 选择本地图片或输入 URL
 4. **切换主题**：标题栏 sun/moon 图标，循环 light → dark → auto
+5. **个人主页**：侧边栏「我的」→「个人主页」查看用户信息、歌单、最近播放、听歌排行
 
 ### 播放音乐
-- **歌单播放**：点击歌单查看歌曲列表，双击歌曲播放，或点击「播放全部」
+- **歌单播放**：点击歌单查看歌曲列表，单击歌曲播放，或点击「播放全部」
 - **搜索播放**：顶部搜索栏输入关键词，回车搜索，支持多类型筛选
 - **榜单播放**：推荐页「榜单精选」点击榜单标题进入详情，或直接点击榜单内歌曲
 - **本地播放**：搜索页点击「打开本地文件」选择本地音频
@@ -274,24 +267,17 @@ cargo build --release --target x86_64-pc-windows-gnu --features custom-protocol
 在搜索结果、歌单详情的歌曲行上（标题和艺术家之间）：
 - ❤️ **喜欢** — 已喜欢时常驻红色，未喜欢时 hover 显示
 - 📁 **添加至歌单** — hover 显示，弹出对话框选择歌单
-- ⏭️ **下一首播放** — 始终显示，点击加入播放队列
+- ⏭️ **下一首播放** — hover 显示，插入当前歌曲后面
 
-### 榜单精选管理
-- **添加榜单**：点击榜单精选标题右侧 edit.svg 图标进入编辑模式 → 点击 +号卡片 → 选择预设或输入自定义 ID
-- **删除榜单**：编辑模式下点击卡片右侧删除按钮
-- **自定义 ID**：在网易云网页版歌单 URL 中找到 ID（如 `playlist?id=19723756`）
+### 播放列表
+- 三处播放列表均支持**拖拽排序**和**复位键**（定位当前播放歌曲）
+- 打开时自动滚动到当前播放歌曲
 
-### 歌词选择模式
-- **右键歌词** → 进入选择模式（停止自动滚动）
-- **左键点击歌词行** → 选中/取消选中
-- **点击「全选」** → 选中所有歌词行
-- **点击「复制」** → 复制选中歌词到剪贴板 + Toast 通知
-- **Esc** 或 **点击「退出」** → 退出选择模式
-
-### 翻译开关
-- 鼠标移到播放界面**右下角** → 显示翻译开关按钮
-- 点击切换翻译开/关
-- 开启时按钮有白色高亮背景
+### 3D 旋转歌词
+- 播放界面设置 → 歌词 → 开启「3D 旋转」
+- 可调旋转曲率（0-90，90 时呈半圆）
+- 旋转模式可单独设置歌词大小和间距
+- 滚轮上下滑动 → 歌词弧形旋转（非上下平移）
 
 ### 快捷键
 - `空格`：播放/暂停
@@ -307,24 +293,20 @@ cargo build --release --target x86_64-pc-windows-gnu --features custom-protocol
 - **背景壁纸**：类型（无/壁纸）、本地图片或 URL、模糊强度、变暗程度、缩放模式、侧边栏透明
 - **主题色**：首页独立的主题色（8 预设 + 自定义）
 - **字体缩放**：首页内容字体缩放（0.8x - 1.4x）
+- **启动后自动播放**：开关（默认关闭）
 
 ### 播放界面设置（localStorage: `rnp-settings`）
-- **外观**：显示模式、配色、主题色、文字阴影/发光
+- **外观**：显示模式、配色、主题色
 - **封面**：水平/垂直对齐、矩形/圆形、阴影、清晰度
 - **背景**：类型（模糊/流体/渐变/纯色/无）、模糊强度、变暗
-- **音频可视化**：样式、配色、灵敏度、不透明度、柱体数量
-- **歌词**：字号、行间距、3D 旋转、曲率、对齐、动画曲线、翻译显示
-- **字体**：字体族（系统/衬线/圆角/等宽/宋体）、缩放
-- **杂项**：隐藏控件、封面旋转、平滑歌词滚动
-- **实验性**：GPU 加速、调试日志、跳过元数据、低延迟
-
-### 榜单精选配置（localStorage: `zephyr-rankings`）
-- 用户自定义的榜单列表（ID + 名称），最多 6 个
-- 首次使用默认 6 个：飙升榜、新歌榜、热歌榜、抖音排行榜、全球说唱榜、欧美热歌榜
+- **歌词**：字号、行间距、3D 旋转、曲率（0-90）、旋转模式专用字号/间距、对齐、动画曲线、翻译显示
+- **字体**：字体族、缩放
+- **杂项**：隐藏控件、封面旋转、平滑歌词滚动、启动后自动播放
+- **实验性**：GPU 加速、调试日志
 
 ### 会话恢复（localStorage: `zephyr-session`）
-- 播放队列、当前歌曲索引、播放进度、音量、静音状态
-- 重启后自动恢复：获取新 URL → 恢复进度 → 自动播放
+- 播放队列（只保存歌曲 ID/名称/歌手，不保存 URL）+ 当前索引 + 进度 + 音量
+- 重启后自动获取新 URL，无需手动清除歌单
 
 ### 网易云 API 配置
 `src/api/netease/core.ts` 中的 `API_BASE` 变量：
@@ -332,6 +314,14 @@ cargo build --release --target x86_64-pc-windows-gnu --features custom-protocol
 export const API_BASE = "https://musicapi.mingqwq.top"; // 你的 api-enhanced 服务地址
 ```
 如需自建 API 服务，参考 [NeteaseCloudMusicApi](https://github.com/Binaryify/NeteaseCloudMusicApi) 或 api-enhanced 版本。
+
+---
+
+## 🔒 安全特性
+- **CSP 策略**：`script-src 'self'`（移除 unsafe-inline，防 XSS）
+- **登录安全**：POST 请求传输密码（不在 URL 参数中）
+- **输入清洗**：API 参数去除控制字符
+- **HTML5 拖放**：`dragDropEnabled: false` 启用前端拖拽排序
 
 ---
 

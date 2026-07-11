@@ -31,6 +31,8 @@ export interface HomeSettings {
   fontScale: number;
   /** 侧边栏透明（壁纸可见时） */
   transparentSidebar: boolean;
+  /** 启动后自动播放 */
+  autoPlayOnStartup: boolean;
 }
 
 const STORAGE_KEY = "home-settings";
@@ -44,6 +46,7 @@ export const DEFAULT_HOME_SETTINGS: HomeSettings = {
   accentColor: "#fa233b",
   fontScale: 1,
   transparentSidebar: true,
+  autoPlayOnStartup: false,
 };
 
 let cached: HomeSettings | null = null;

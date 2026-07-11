@@ -714,7 +714,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           </div>
           <div v-for="(song, idx) in currentPlaylistSongs" :key="song.id"
             class="song-trow" :class="{ active: song.id === store.currentSong?.id, 'record-row': isRecordView }"
-            @dblclick="playSong(idx)"
+            @click="playSong(idx)"
             @contextmenu="onContextMenu($event, song)">
             <span class="col-idx">{{ idx + 1 }}</span>
             <span class="col-title">

@@ -278,6 +278,8 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
           if (shouldAutoPlay) {
             store.setPlaying(true);
             startPolling();
+          } else {
+            store.setPlaying(false);
           }
           // 清除恢复标记
           if (song) (song as any)._restorePlaying = false;
@@ -305,8 +307,11 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
           audio.addEventListener("loadedmetadata", onReady);
         }
         if (shouldAutoPlay) {
+          store.setPlaying(true);
           audio.play().then(() => log.info(TAG, "play() ok", { dur: audio.duration }))
             .catch((e) => log.error(TAG, "play() failed", { error: String(e) }));
+        } else {
+          store.setPlaying(false);
         }
         // 清除恢复标记
         if (song) (song as any)._restorePlaying = false;

@@ -62,7 +62,9 @@ export interface PlayerSettings {
   lyricBlur: number; // px for inactive lines
   lyricFade: number; // 0..1 opacity falloff
   lyricRotate: boolean;
-  rotateCurvature: number; // 0..50
+  rotateCurvature: number; // 0..90
+  rotateLyricFontSize: number; // 旋转模式专用歌词字体大小 px
+  rotateLyricLineGap: number; // 旋转模式专用歌词间距 px
   currentLyricAlign: LyricAlign;
   lyricStagger: number; // 0..1 stagger amount
   animationTiming: AnimationTiming;
@@ -75,6 +77,7 @@ export interface PlayerSettings {
   autoHideMiniInfo: boolean;
   smoothLyricScroll: boolean; // 歌词平滑滚动（滚轮滑动时有过渡效果）
   coverRotation: boolean; // 首页封面旋转（播放时旋转）
+  autoPlayOnStartup: boolean; // 进入程序后自动播放
 
   // Experimental
   gpuAcceleration: boolean;
@@ -123,6 +126,8 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   lyricFade: 0.32,
   lyricRotate: false,
   rotateCurvature: 18,
+  rotateLyricFontSize: 24,
+  rotateLyricLineGap: 28,
   currentLyricAlign: "left",
   lyricStagger: 0.4,
   animationTiming: "smooth",
@@ -133,6 +138,7 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   autoHideMiniInfo: true,
   smoothLyricScroll: false,
   coverRotation: false,
+  autoPlayOnStartup: false,
 
   gpuAcceleration: true,
   debugLog: false,

@@ -197,9 +197,11 @@ onMounted(() => {
   const savedTime = store.currentTime;  // 保存上次播放位置，URL 获取过程中会被重置
   if (song) {
     log.info("app", "restoring last song", { name: song.name, hasUrl: !!song.url, hasLrc: !!song.lrc, savedTime });
+    const shouldAutoPlay = homeSettings.autoPlayOnStartup;
     if (song.source === "netease" && song.neteaseId) {
       // 标记恢复播放和恢复进度，让 useAudioBinding 在 URL 加载完成后处理
-      (song as any)._restorePlaying = true;
+      // 仅在设置开启自动播放时才标记 _restorePlaying
+      (song as any)._restorePlaying = shouldAutoPlay;
       (song as any)._restoreTime = savedTime > 0 ? savedTime : 0;
       song.url = "";
       song.lrc = "";
@@ -211,7 +213,7 @@ onMounted(() => {
         store.queue[idx].lrc = "";
         (store.queue[idx] as any).yrcText = "";
         (store.queue[idx] as any).tlyricText = "";
-        (store.queue[idx] as any)._restorePlaying = true;
+        (store.queue[idx] as any)._restorePlaying = shouldAutoPlay;
         (store.queue[idx] as any)._restoreTime = (song as any)._restoreTime;
       }
       store.lyrics = [];
