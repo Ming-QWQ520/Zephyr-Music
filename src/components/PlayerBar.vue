@@ -339,7 +339,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <Icon v-else name="music" :size="22" />
         </div>
       </div>
-      <div class="meta">
+      <div class="meta" :class="{ 'auto-hidden': settings.autoHideMiniInfo && store.isPlaying }">
         <div class="title truncate">{{ store.currentSong?.name || "未在播放" }}</div>
         <div class="artist truncate">{{ store.currentSong?.artist || "—" }}</div>
       </div>
@@ -517,7 +517,9 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .vinyl.spinning .cover { animation: vinyl-spin 6s linear infinite; }
 .cover { width: 48px; height: 48px; border-radius: 50%; overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .cover img { width: 100%; height: 100%; object-fit: cover; }
-.meta { min-width: 0; flex: 1; }
+.meta { min-width: 0; flex: 1; transition: opacity 0.3s var(--ease-out); }
+.meta.auto-hidden { opacity: 0; }
+.player-bar:hover .meta.auto-hidden { opacity: 1; }
 .meta .title { font-size: 13px; font-weight: 600; color: var(--text); }
 .meta .artist { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
 .like-btn { width: 28px; height: 28px; color: var(--text-tertiary); flex-shrink: 0; }

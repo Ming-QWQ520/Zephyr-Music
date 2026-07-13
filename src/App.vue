@@ -7,6 +7,8 @@ import { useNeteaseAuth } from "@/composables/useNeteaseAuth";
 import { useNeteaseUser, formatCreateTime, genderText, regionText } from "@/composables/useNeteaseUser";
 import { useWindowControls } from "@/composables/useWindowControls";
 import { useHomeSettings } from "@/composables/useHomeSettings";
+import { initStores } from "@/composables/useStore";
+import { reloadSettingsFromStore } from "@/composables/useSettings";
 import Sidebar from "@/components/Sidebar.vue";
 import GlobalSearchBar from "@/components/GlobalSearchBar.vue";
 import SearchView from "@/components/SearchView.vue";
@@ -125,6 +127,12 @@ function toggleNowPlaying() {
 onMounted(() => {
   log.init();
   log.info("app", "booted");
+  // 初始化 tauri-plugin-store，加载持久化数据到内存缓存
+  // 然后重新读取设置，确保首次启动时能正确加载 store 中的值
+  initStores().then(() => {
+    reloadSettingsFromStore();
+    log.info("app", "store loaded");
+  });
   checkNeLogin();
   // 全局禁用原生右键菜单（返回、刷新、另存为、打印等）
   document.addEventListener("contextmenu", (e) => {

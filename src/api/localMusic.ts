@@ -2,6 +2,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { log } from "@/composables/logger";
 import type { Song } from "@/types";
 import { searchSongs, fetchLyrics, parseLrc } from "@/api/music";
+import { useSettings } from "@/composables/useSettings";
 
 /**
  * Build the localaudio:/// URL that the Rodio backend understands.
@@ -67,7 +68,8 @@ export async function pickLocalAudioFiles(): Promise<Song[]> {
     const fname = baseName(p);
     const url = buildLocalUrl(p);
     const id = `local:${encodeURIComponent(p)}`;
-    const meta = await fetchLocalMeta(fname);
+    const skipMeta = useSettings().settings.skipMetadata;
+    const meta = skipMeta ? {} : await fetchLocalMeta(fname);
     const song: Song = {
       id,
       name: meta.title || stripExt(fname),

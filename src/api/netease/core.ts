@@ -12,25 +12,26 @@ import { ref } from "vue";
 import { log } from "@/composables/logger";
 import { truncateForLog } from "@/utils/format";
 import type { NeteasePlaylist, NeteaseUser } from "@/types";
+import { storeGetSync, storeSetSync } from "@/composables/useStore";
 
 /** 网易云 API 基础地址（api-enhanced 服务） */
 export const API_BASE = "https://musicapi.mingqwq.top";
-/** localStorage 中存储 cookie 的 key */
+/** store 中存储 cookie 的 key */
 export const COOKIE_KEY = "netease-cookie";
 /** 日志 tag */
 export const TAG = "netease-api";
 
 /** 读取本地保存的 cookie */
 export function getCookie(): string {
-  try { return localStorage.getItem(COOKIE_KEY) || ""; } catch { return ""; }
+  try { return storeGetSync(COOKIE_KEY) || ""; } catch { return ""; }
 }
 /** 保存 cookie 到本地 */
 export function setCookie(cookie: string): void {
-  try { localStorage.setItem(COOKIE_KEY, cookie); } catch { /* ignore */ }
+  try { storeSetSync(COOKIE_KEY, cookie); } catch { /* ignore */ }
 }
 /** 清除本地 cookie（退出登录） */
 export function clearCookie(): void {
-  try { localStorage.removeItem(COOKIE_KEY); } catch { /* ignore */ }
+  try { storeSetSync(COOKIE_KEY, ""); } catch { /* ignore */ }
 }
 
 /**

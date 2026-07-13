@@ -57,3 +57,4 @@ Thumbs.db
 # === Tauri build artifacts ===
 src-tauri/icons/android/
 src-tauri/icons/ios/
+bun.lock

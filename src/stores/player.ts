@@ -4,6 +4,7 @@ import { fetchLyrics } from "@/api/music";
 import { songUrlV1 as songUrl, lyricNew, lyric, parseYrc } from "@/api/netease";
 import { log } from "@/composables/logger";
 import { useSettings } from "@/composables/useSettings";
+import { storeGetSync, storeSetSync } from "@/composables/useStore";
 
 const SESSION_KEY = "zephyr-session";
 
@@ -17,7 +18,7 @@ interface SessionData {
 
 function loadSession(): SessionData | null {
   try {
-    const raw = localStorage.getItem(SESSION_KEY);
+    const raw = storeGetSync(SESSION_KEY);
     if (!raw) return null;
     const d = JSON.parse(raw);
     if (d.queue && Array.isArray(d.queue) && d.queue.length > 0) return d;
@@ -26,7 +27,7 @@ function loadSession(): SessionData | null {
 }
 
 function saveSession(data: SessionData) {
-  try { localStorage.setItem(SESSION_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+  try { storeSetSync(SESSION_KEY, JSON.stringify(data)); } catch { /* ignore */ }
 }
 
 interface State {

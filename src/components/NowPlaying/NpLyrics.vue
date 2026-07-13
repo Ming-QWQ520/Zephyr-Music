@@ -186,19 +186,21 @@ function computeAllTransforms(): LineTransform[] {
   function scaleByOffset(offset: number): number {
     const a = Math.abs(offset);
     const v = Math.max(1 - a * 0.15, 0);
-    return v * v * v * 0.2 + 0.8;
+    const base = v * v * v * 0.2 + 0.8;
+    return base / Math.max(0.5, settings.lyricZoom);
   }
-  // Opacity (RNP opacityByOffset)
+  // Opacity (RNP opacityByOffset) — lyricFade 控制非活跃行淡出强度
   function opacityByOffset(offset: number): number {
     const a = Math.abs(offset);
     if (a <= 1) return 1;
-    return Math.max(1 - 0.25 * (a - 1), 0.3);
+    const base = Math.max(1 - 0.25 * (a - 1), 0.3);
+    return 1 - (1 - base) * settings.lyricFade;
   }
-  // Blur (RNP blurByOffset)
+  // Blur (RNP blurByOffset) — lyricBlur 控制非活跃行模糊强度
   function blurByOffset(offset: number): number {
     const a = Math.abs(offset);
     if (a === 0) return 0;
-    return Math.min(0.2 + 0.3 * a, 1.2);
+    return Math.min(0.2 + 0.3 * a, 1.2) * settings.lyricBlur;
   }
   // Delay (RNP delayByOffset)
   function delayByOffset(offset: number): number {
@@ -223,9 +225,10 @@ function computeAllTransforms(): LineTransform[] {
   }));
 
   // Active line: positioned at alignPct of container height, vertically centered.
-  const activeH = heightFor(cur);
+  const activeScale = settings.lyricZoom;
+  const activeH = heightFor(cur) * activeScale;
   transforms[cur].top = containerH * (alignPct / 100) - activeH / 2;
-  transforms[cur].scale = 1;
+  transforms[cur].scale = activeScale;
   transforms[cur].opacity = 1;
   transforms[cur].blur = 0;
   transforms[cur].delay = delayByOffset(0);
@@ -512,7 +515,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="right-pane" :class="[`lyric-align-${settings.lyricRotate ? 'left' : settings.currentLyricAlign}`, { 'lyric-rotate-on': settings.lyricRotate }]">
+  <section
+    class="right-pane"
+    :class="[`lyric-align-${settings.lyricRotate ? 'left' : settings.currentLyricAlign}`, { 'lyric-rotate-on': settings.lyricRotate }]"
+    :style="{
+      '--lyric-active-color': settings.lyricActiveColor,
+      '--lyric-inactive-color': settings.lyricInactiveColor,
+      '--yrc-played-color': settings.yrcPlayedColor,
+      '--yrc-unplayed-color': settings.yrcUnplayedColor,
+    }"
+  >
     <div v-if="!parsedLyrics.length" class="no-lyrics">
       <Icon name="lyrics" :size="42" />
       <p>暂无歌词</p>
@@ -649,10 +661,10 @@ onUnmounted(() => {
 .right-pane.lyric-align-right .lyric-line { align-items: flex-end; }
 .right-pane.lyric-align-left .lyric-line { align-items: flex-start; }
 .lyric-line.active {
-  color: #fff;
+  color: var(--lyric-active-color, #fff);
 }
-.lyric-line.passed { color: rgba(255, 255, 255, 0.42); }
-.lyric-line:not(.active) { color: rgba(255, 255, 255, 0.55); }
+.lyric-line.passed { color: var(--lyric-inactive-color, rgba(255, 255, 255, 0.42)); opacity: 0.78; }
+.lyric-line:not(.active) { color: var(--lyric-inactive-color, rgba(255, 255, 255, 0.55)); }
 /* Hover: brighter background, no text highlight change. */
 .lyric-line.hovered:not(.active) {
   background: rgba(255, 255, 255, 0.15);
@@ -676,8 +688,8 @@ onUnmounted(() => {
 .lyric-text.yrc-wipe .yrc-word {
   background-image: linear-gradient(
     to right,
-    #fff calc(var(--word-progress, 0) * 100%),
-    rgba(255, 255, 255, 0.3) calc(var(--word-progress, 0) * 100%)
+    var(--yrc-played-color, #fff) calc(var(--word-progress, 0) * 100%),
+    var(--yrc-unplayed-color, rgba(255, 255, 255, 0.3)) calc(var(--word-progress, 0) * 100%)
   );
   -webkit-background-clip: text;
   background-clip: text;

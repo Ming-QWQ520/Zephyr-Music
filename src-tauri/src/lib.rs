@@ -44,20 +44,15 @@ fn wl(app: &tauri::AppHandle, msg: &str) {
 }
 
 #[tauri::command]
-fn init_log(app: tauri::AppHandle) -> Result<String, String> {
-    // 优先使用 appDataDir 作为日志目录（Tauri 推荐的持久化目录），
-    // 失败时回退到 exe 同级目录下的 log 子目录。
-    let ld = match app.path().app_data_dir() {
-        Ok(d) => d.join("log"),
-        Err(_) => {
-            let d = std::env::current_exe()
-                .map_err(|e| e.to_string())?
-                .parent()
-                .ok_or("no dir")?
-                .to_path_buf();
-            d.join("log")
-        }
-    };
+fn init_log(_app: tauri::AppHandle) -> Result<String, String> {
+    // 日志目录：exe 所在目录下的 log 子目录
+    // 这样所有运行时数据都跟随 exe，便于便携使用
+    let ld = std::env::current_exe()
+        .map_err(|e| e.to_string())?
+        .parent()
+        .ok_or("no dir")?
+        .to_path_buf();
+    let ld = ld.join("log");
     fs::create_dir_all(&ld).map_err(|e| e.to_string())?;
 
     // 日志轮转：清理超 5MB 的旧日志，最多保留 5 个。
@@ -120,7 +115,7 @@ fn init_log(app: tauri::AppHandle) -> Result<String, String> {
     )
     .map_err(|e| e.to_string())?;
     // 优雅处理 Mutex poison：避免在异常情况下 panic 整个进程
-    if let Ok(mut guard) = app.state::<LogFile>().0.lock() {
+    if let Ok(mut guard) = _app.state::<LogFile>().0.lock() {
         *guard = Some(lps.clone());
     }
     Ok(lps)
@@ -278,6 +273,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
         .manage(LogFile(Mutex::new(None)))
         .manage(Arc::new(Mutex::new(AudioState::new())))
         .invoke_handler(tauri::generate_handler![

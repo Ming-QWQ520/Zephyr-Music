@@ -8,6 +8,7 @@ import {
 } from "@/api/netease";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
+import { storeGetSync, storeSetSync } from "@/composables/useStore";
 const toast = useToast();
 import Icon from "@/components/Icon.vue";
 import type { Song } from "@/types";
@@ -38,7 +39,7 @@ const radarSubText = computed(() => {
   return name ? `私人雷达 | 从[${name}]听起` : (personalRadarName.value || '为你打造的歌单');
 });
 
-// 榜单精选 - 支持用户自定义（持久化到 localStorage）
+// 榜单精选 - 支持用户自定义（持久化到 tauri-plugin-store）
 interface RankingItem { id: number; name: string; coverImgUrl: string; songs: Song[]; loading: boolean; }
 
 /** 预设榜单池（用户可从中选择添加） */
@@ -77,10 +78,10 @@ const DEFAULT_RANKINGS: { id: number; name: string }[] = [
 const MAX_RANKINGS = 6;
 const RANKINGS_STORAGE_KEY = "zephyr-rankings";
 
-/** 从 localStorage 加载用户自定义榜单 */
+/** 从 store 加载用户自定义榜单 */
 function loadCustomRankings(): { id: number; name: string }[] {
   try {
-    const raw = localStorage.getItem(RANKINGS_STORAGE_KEY);
+    const raw = storeGetSync(RANKINGS_STORAGE_KEY);
     if (!raw) return DEFAULT_RANKINGS;
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) {
@@ -90,9 +91,9 @@ function loadCustomRankings(): { id: number; name: string }[] {
   } catch { return DEFAULT_RANKINGS; }
 }
 
-/** 保存榜单到 localStorage */
+/** 保存榜单到 store */
 function saveCustomRankings(items: { id: number; name: string }[]) {
-  try { localStorage.setItem(RANKINGS_STORAGE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
+  try { storeSetSync(RANKINGS_STORAGE_KEY, JSON.stringify(items)); } catch { /* ignore */ }
 }
 
 const rankings = ref<RankingItem[]>(

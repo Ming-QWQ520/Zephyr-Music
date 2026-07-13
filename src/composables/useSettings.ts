@@ -14,14 +14,15 @@ import { reactive, watch } from "vue";
 import type {
   DisplayMode, ColorMode, HAlign, VAlign, BgType,
   VisualizerStyle, VisualizerColor, LyricAlign,
-  AnimationTiming, FontFamily,
+  AnimationTiming, FontFamily, Scene3D,
 } from "@/types";
+import { storeSetSync, storeGetSync, initStores } from "@/composables/useStore";
 
 // 重新导出类型别名，保持与原 SettingsPanel.vue 一致的对外 API
 export type {
   DisplayMode, ColorMode, HAlign, VAlign, BgType,
   VisualizerStyle, VisualizerColor, LyricAlign,
-  AnimationTiming, FontFamily,
+  AnimationTiming, FontFamily, Scene3D,
 };
 
 export interface PlayerSettings {
@@ -44,6 +45,9 @@ export interface PlayerSettings {
   bgType: BgType;
   bgBlur: number; // px
   bgDim: number; // 0..100
+
+  // 3D playback scene (ported from Mineradio particle visualizer)
+  scene3D: Scene3D;
 
   // Audio visualizer (background bars/lines that bounce with the audio)
   visualizerStyle: VisualizerStyle;
@@ -68,6 +72,11 @@ export interface PlayerSettings {
   currentLyricAlign: LyricAlign;
   lyricStagger: number; // 0..1 stagger amount
   animationTiming: AnimationTiming;
+  // 歌词颜色（CSS 颜色字符串，支持 hex / rgba）
+  lyricActiveColor: string; // 逐行已播放颜色（当前行）
+  lyricInactiveColor: string; // 逐行未播放颜色（非当前行）
+  yrcPlayedColor: string; // 逐字已播放颜色（同时用作擦除边缘高亮）
+  yrcUnplayedColor: string; // 逐字未播放颜色
 
   // Audio
   audioLevel: string; // standard/higher/exhigh/lossless/hires/jyeffect/sky/dolby/jymaster
@@ -88,27 +97,34 @@ export interface PlayerSettings {
   // Font
   fontFamily: FontFamily;
   fontScale: number; // 0.8..1.4
+
+  /** 设置版本号（用于迁移，不直接显示在 UI 中） */
+  _v?: number;
 }
 
 const STORAGE_KEY = "rnp-settings";
+/** 设置版本：递增以强制迁移新默认值（覆盖旧版本中可能存在的旧默认值） */
+const SETTINGS_VERSION = 4;
 
 export const DEFAULT_SETTINGS: PlayerSettings = {
   displayMode: "both",
-  colorMode: "light",
+  colorMode: "dark",
   accentColor: "#fa233b",
   textShadow: true,
   textGlow: false,
   progressPreview: true,
 
-  coverHAlign: "left",
+  coverHAlign: "center",
   coverVAlign: "center",
   rectangleCover: false,
   coverQuality: 300,
-  coverShadow: true,
+  coverShadow: false,
 
   bgType: "blur",
-  bgBlur: 10,
-  bgDim: 30,
+  bgBlur: 2,
+  bgDim: 50,
+
+  scene3D: "off",
 
   visualizerStyle: "off",
   visualizerColor: "accent",
@@ -117,26 +133,31 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
   visualizerBarCount: 48,
 
   boldFirstLine: true,
-  lyricFontSize: 28,
-  lyricLineGap: 18,
+  lyricFontSize: 35,
+  lyricLineGap: 15,
   showRomaji: false,
   showTranslation: true,
-  lyricZoom: 1.18,
-  lyricBlur: 6,
-  lyricFade: 0.32,
+  lyricZoom: 1.05,
+  lyricBlur: 2,
+  lyricFade: 1,
   lyricRotate: false,
-  rotateCurvature: 18,
-  rotateLyricFontSize: 24,
-  rotateLyricLineGap: 28,
+  rotateCurvature: 50,
+  rotateLyricFontSize: 35,
+  rotateLyricLineGap: 5,
   currentLyricAlign: "left",
-  lyricStagger: 0.4,
+  lyricStagger: 0,
   animationTiming: "smooth",
+  // 歌词颜色默认值
+  lyricActiveColor: "#ffffff",
+  lyricInactiveColor: "rgba(255, 255, 255, 0.45)",
+  yrcPlayedColor: "#ffffff",
+  yrcUnplayedColor: "rgba(255, 255, 255, 0.3)",
 
-  audioLevel: "exhigh",
+  audioLevel: "standard",
 
   hidePlayerControls: false,
-  autoHideMiniInfo: true,
-  smoothLyricScroll: false,
+  autoHideMiniInfo: false,
+  smoothLyricScroll: true,
   coverRotation: false,
   autoPlayOnStartup: false,
 
@@ -147,6 +168,8 @@ export const DEFAULT_SETTINGS: PlayerSettings = {
 
   fontFamily: "system",
   fontScale: 1,
+
+  _v: 4,
 };
 
 let cached: PlayerSettings | null = null;
@@ -154,12 +177,10 @@ let cached: PlayerSettings | null = null;
 export function loadSettings(): PlayerSettings {
   if (cached) return cached;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storeGetSync(STORAGE_KEY);
     if (!raw) return (cached = { ...DEFAULT_SETTINGS });
     const parsed = JSON.parse(raw);
     // Migrate legacy "karaokeAnimation" setting → new visualizer settings.
-    // Old: karaokeAnimation: "off" | "wave" | "scale" | "color"
-    // New: visualizerStyle: "off" | "bars" | "lines" | "wave"
     if (parsed && "karaokeAnimation" in parsed && !("visualizerStyle" in parsed)) {
       const old = parsed.karaokeAnimation;
       parsed.visualizerStyle =
@@ -169,7 +190,32 @@ export function loadSettings(): PlayerSettings {
         old === "color" ? "bars" : "bars";
       delete parsed.karaokeAnimation;
     }
+    // 版本迁移：当设置版本不匹配时，直接用新默认值覆盖所有被修改的字段。
+    // 这样即使旧 store 残留，也能确保新默认值生效。
+    if (!parsed._v || parsed._v !== SETTINGS_VERSION) {
+      const migrateFields: (keyof PlayerSettings)[] = [
+        "colorMode",
+        "coverHAlign", "coverVAlign", "coverShadow", "coverQuality", "rectangleCover",
+        "bgType", "bgBlur", "bgDim",
+        "lyricFontSize", "lyricLineGap", "lyricZoom", "lyricStagger",
+        "lyricBlur", "lyricFade", "boldFirstLine", "showTranslation", "showRomaji",
+        "lyricRotate", "rotateCurvature", "rotateLyricFontSize", "rotateLyricLineGap",
+        "currentLyricAlign", "animationTiming",
+        "audioLevel", "smoothLyricScroll",
+        "hidePlayerControls", "autoHideMiniInfo", "coverRotation", "autoPlayOnStartup",
+        "scene3D",
+        "lyricActiveColor", "lyricInactiveColor", "yrcPlayedColor", "yrcUnplayedColor",
+        "textShadow", "textGlow", "progressPreview",
+        "fontFamily", "fontScale",
+      ];
+      for (const key of migrateFields) {
+        (parsed as any)[key] = DEFAULT_SETTINGS[key];
+      }
+      parsed._v = SETTINGS_VERSION;
+    }
     cached = { ...DEFAULT_SETTINGS, ...parsed } as PlayerSettings;
+    // 立即保存迁移后的设置到 store
+    saveSettings(cached);
   } catch {
     cached = { ...DEFAULT_SETTINGS };
   }
@@ -178,9 +224,9 @@ export function loadSettings(): PlayerSettings {
 
 export function saveSettings(s: PlayerSettings) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    storeSetSync(STORAGE_KEY, JSON.stringify(s));
   } catch {
-    /* ignore quota errors */
+    /* ignore errors */
   }
 }
 
@@ -231,4 +277,34 @@ watch(
 
 export function useSettings() {
   return { settings: _settings, defaults: DEFAULT_SETTINGS };
+}
+
+/**
+ * 异步重新加载设置：从 store 读取最新值并更新响应式 settings。
+ * 在 initStores() 完成后调用，确保 store 数据加载到内存缓存后再读取。
+ * 这样首次启动时能正确读取持久化数据（store 是异步加载的）。
+ */
+export async function reloadSettingsFromStore() {
+  await initStores();
+  const fresh = loadSettingsFromStore();
+  // 用 store 中的值更新响应式 settings（保留 watch 不会触发的字段）
+  for (const key of Object.keys(fresh)) {
+    (_settings as any)[key] = (fresh as any)[key];
+  }
+}
+
+/** 从 store 重新读取（不走 cached，强制刷新） */
+function loadSettingsFromStore(): PlayerSettings {
+  try {
+    const raw = storeGetSync(STORAGE_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    const parsed = JSON.parse(raw);
+    if (!parsed._v || parsed._v !== SETTINGS_VERSION) {
+      // 版本不匹配：用默认值
+      return { ...DEFAULT_SETTINGS };
+    }
+    return { ...DEFAULT_SETTINGS, ...parsed } as PlayerSettings;
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
 }

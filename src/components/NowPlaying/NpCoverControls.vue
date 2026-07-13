@@ -87,7 +87,7 @@ const {
           class="progress"
           :model-value="progressFrac"
           :always-show-on-hover="true"
-          :format="(v) => getLyricAtTime(v * store.duration)"
+          :format="(v) => settings.progressPreview ? getLyricAtTime(v * store.duration) : formatTime(v * store.duration)"
           @change="onSeek"
         />
         <span class="time">{{ formatTime(store.duration) }}</span>

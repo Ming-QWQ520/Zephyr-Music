@@ -48,8 +48,35 @@ const activeTab = ref<TabKey>("appearance");
 
 const ACCENT_PRESETS = ["#fa233b", "#ff6b35", "#ffd23f", "#06d6a0", "#118ab2", "#9d4edd", "#ef476f", "#073b4c"];
 
+const LYRIC_COLOR_GROUPS = [
+  { group: "逐行歌词", items: [
+    { key: "lyricActiveColor" as const, label: "已播放颜色" },
+    { key: "lyricInactiveColor" as const, label: "未播放颜色" },
+  ]},
+  { group: "逐字歌词", items: [
+    { key: "yrcPlayedColor" as const, label: "已播放颜色" },
+    { key: "yrcUnplayedColor" as const, label: "未播放颜色" },
+  ]},
+];
+function toHex(color: string): string {
+  if (/^#[0-9a-fA-F]{6}$/.test(color)) return color;
+  if (/^#[0-9a-fA-F]{3}$/.test(color)) return "#" + color.slice(1).split("").map((c) => c + c).join("");
+  const m = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+  if (m) return "#" + [m[1], m[2], m[3]].map((v) => parseInt(v).toString(16).padStart(2, "0")).join("");
+  return "#ffffff";
+}
+type BgType2D = "blur" | "fluid" | "gradient" | "solid" | "none";
+type Scene3DKey = "silk";
+function selectBgType(m: BgType2D) { settings.scene3D = "off"; settings.bgType = m; }
+function selectScene3D(s: Scene3DKey) { settings.scene3D = s; }
+
 function resetAll() {
-  Object.assign(settings, defaults);
+  // 深拷贝 DEFAULT_SETTINGS 的每个字段，确保响应式触发 + 避免污染原常量
+  const fresh = JSON.parse(JSON.stringify(defaults));
+  // 逐字段赋值，确保 Vue reactive 能追踪到每个变化
+  for (const key of Object.keys(fresh)) {
+    (settings as any)[key] = fresh[key];
+  }
   emit("reset");
 }
 
@@ -204,13 +231,9 @@ onMounted(async () => {
               <h3>背景</h3>
               <div class="row">
                 <div class="label">背景类型</div>
-                <div class="seg">
-                  <button
-                    v-for="m in ['blur', 'fluid', 'gradient', 'solid', 'none'] as const"
-                    :key="m"
-                    :class="{ active: settings.bgType === m }"
-                    @click="settings.bgType = m"
-                  >{{ m === 'blur' ? '模糊' : m === 'fluid' ? '流体' : m === 'gradient' ? '渐变' : m === 'solid' ? '纯色' : '无' }}</button>
+                <div class="seg wrap">
+                  <button v-for="m in ['blur', 'fluid', 'gradient', 'solid', 'none'] as const" :key="m" :class="{ active: settings.scene3D === 'off' && settings.bgType === m }" @click="selectBgType(m)">{{ m === 'blur' ? '模糊' : m === 'fluid' ? '流体' : m === 'gradient' ? '渐变' : m === 'solid' ? '纯色' : '无' }}</button>
+                  <button :class="{ active: settings.scene3D === 'silk' }" @click="selectScene3D('silk')">丝绸粒子</button>
                 </div>
               </div>
               <div class="row">
@@ -221,127 +244,47 @@ onMounted(async () => {
                 <div class="label">背景变暗</div>
                 <Slider class="row-slider" :model-value="settings.bgDim / 100" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.bgDim = Math.round(v * 100)" />
               </div>
-
-              <!-- Audio visualizer (background bars / lines that bounce with the audio) -->
-              <div class="row subgroup">
-                <div class="label subgroup-title">音频可视化</div>
-              </div>
-              <div class="row">
-                <div class="label">可视化样式</div>
-                <div class="seg">
-                  <button
-                    v-for="m in ['off', 'bars', 'lines', 'wave'] as const"
-                    :key="m"
-                    :class="{ active: settings.visualizerStyle === m }"
-                    @click="settings.visualizerStyle = m"
-                  >{{ m === 'off' ? '关' : m === 'bars' ? '长方体' : m === 'lines' ? '线条' : '波浪' }}</button>
-                </div>
-              </div>
-              <div class="row">
-                <div class="label">配色</div>
-                <div class="seg">
-                  <button
-                    v-for="m in ['accent', 'white', 'rainbow', 'album'] as const"
-                    :key="m"
-                    :class="{ active: settings.visualizerColor === m }"
-                    @click="settings.visualizerColor = m"
-                  >{{ m === 'accent' ? '主题色' : m === 'white' ? '白色' : m === 'rainbow' ? '彩虹' : '专辑' }}</button>
-                </div>
-              </div>
-              <div class="row">
-                <div class="label">灵敏度</div>
-                <Slider class="row-slider" :model-value="settings.visualizerIntensity" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.visualizerIntensity = +v.toFixed(2)" />
-              </div>
-              <div class="row">
-                <div class="label">不透明度</div>
-                <Slider class="row-slider" :model-value="settings.visualizerOpacity" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.visualizerOpacity = +v.toFixed(2)" />
-              </div>
-              <div class="row">
-                <div class="label">柱体数量</div>
-                <Slider class="row-slider" :model-value="(settings.visualizerBarCount - 12) / 20" :format="(v) => `${Math.round(12 + v * 20)}`" @change="(v) => settings.visualizerBarCount = Math.round(12 + v * 20)" />
-              </div>
-              <p class="hint-block" v-if="settings.visualizerStyle !== 'off'">
-                可视化使用模拟频谱（跟随播放进度、音量、节拍），不接触音频元素以确保播放稳定。性能优化：32 柱上限、30fps、暂停时停止。
-              </p>
             </section>
 
             <!-- Lyrics -->
             <section v-show="activeTab === 'lyrics'" class="tab-pane">
               <h3>歌词</h3>
-              <div class="row toggle">
-                <div class="label">首行加粗</div>
-                <button class="switch" :class="{ on: settings.boldFirstLine }" @click="settings.boldFirstLine = !settings.boldFirstLine" />
-              </div>
-              <div class="row">
-                <div class="label">字号</div>
-                <Slider class="row-slider" :model-value="(settings.lyricFontSize - 14) / 40" :format="(v) => `${Math.round(14 + v * 40)}px`" @change="(v) => settings.lyricFontSize = Math.round(14 + v * 40)" />
-              </div>
-              <div class="row">
-                <div class="label">行间距</div>
-                <Slider class="row-slider" :model-value="settings.lyricLineGap / 60" :format="(v) => `${Math.round(v * 60)}px`" @change="(v) => settings.lyricLineGap = Math.round(v * 60)" />
-              </div>
-              <div class="row toggle">
-                <div class="label">显示罗马音</div>
-                <button class="switch" :class="{ on: settings.showRomaji }" @click="settings.showRomaji = !settings.showRomaji" />
-              </div>
-              <div class="row toggle">
-                <div class="label">显示翻译</div>
-                <button class="switch" :class="{ on: settings.showTranslation }" @click="settings.showTranslation = !settings.showTranslation" />
-              </div>
-              <div class="row">
-                <div class="label">当前行缩放</div>
-                <Slider class="row-slider" :model-value="(settings.lyricZoom - 1) / 0.6" :format="(v) => `${(1 + v * 0.6).toFixed(2)}x`" @change="(v) => settings.lyricZoom = +(1 + v * 0.6).toFixed(2)" />
-              </div>
-              <div class="row">
-                <div class="label">非活跃行模糊</div>
-                <Slider class="row-slider" :model-value="settings.lyricBlur / 20" :format="(v) => `${Math.round(v * 20)}px`" @change="(v) => settings.lyricBlur = Math.round(v * 20)" />
-              </div>
-              <div class="row">
-                <div class="label">非活跃行淡出</div>
-                <Slider class="row-slider" :model-value="settings.lyricFade" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.lyricFade = +v.toFixed(2)" />
-              </div>
-              <div class="row toggle">
-                <div class="label">3D 旋转</div>
-                <button class="switch" :class="{ on: settings.lyricRotate }" @click="settings.lyricRotate = !settings.lyricRotate" />
-              </div>
-              <div class="row">
-                <div class="label">旋转曲率</div>
-                <Slider class="row-slider" :model-value="settings.rotateCurvature / 90" :format="(v) => `${Math.round(v * 90)}`" @change="(v) => settings.rotateCurvature = Math.round(v * 90)" />
-              </div>
-              <div v-if="settings.lyricRotate" class="row">
-                <div class="label">旋转歌词大小</div>
-                <Slider class="row-slider" :model-value="(settings.rotateLyricFontSize - 14) / 40" :format="(v) => `${Math.round(14 + v * 40)}px`" @change="(v) => settings.rotateLyricFontSize = Math.round(14 + v * 40)" />
-              </div>
-              <div v-if="settings.lyricRotate" class="row">
-                <div class="label">旋转歌词间距</div>
-                <Slider class="row-slider" :model-value="settings.rotateLyricLineGap / 80" :format="(v) => `${Math.round(v * 80)}px`" @change="(v) => settings.rotateLyricLineGap = Math.round(v * 80)" />
-              </div>
-              <div class="row">
-                <div class="label">当前行对齐</div>
-                <div class="seg">
-                  <button
-                    v-for="m in ['left', 'center'] as const"
-                    :key="m"
-                    :class="{ active: settings.currentLyricAlign === m }"
-                    @click="settings.currentLyricAlign = m"
-                  >{{ m === 'left' ? '左' : '中' }}</button>
+
+              <div class="row subgroup"><div class="label subgroup-title">基础</div></div>
+              <div class="row toggle"><div class="label">首行加粗</div><button class="switch" :class="{ on: settings.boldFirstLine }" @click="settings.boldFirstLine = !settings.boldFirstLine" /></div>
+              <div class="row toggle"><div class="label">显示翻译</div><button class="switch" :class="{ on: settings.showTranslation }" @click="settings.showTranslation = !settings.showTranslation" /></div>
+              <div class="row toggle"><div class="label">显示罗马音</div><button class="switch" :class="{ on: settings.showRomaji }" @click="settings.showRomaji = !settings.showRomaji" /></div>
+              <div class="row"><div class="label">当前行对齐</div><div class="seg"><button v-for="m in ['left', 'center'] as const" :key="m" :class="{ active: settings.currentLyricAlign === m }" @click="settings.currentLyricAlign = m">{{ m === 'left' ? '左' : '中' }}</button></div></div>
+
+              <div class="row subgroup"><div class="label subgroup-title">排版</div></div>
+              <div class="row"><div class="label">字号</div><Slider class="row-slider" :model-value="(settings.lyricFontSize - 14) / 40" :format="(v) => `${Math.round(14 + v * 40)}px`" @change="(v) => settings.lyricFontSize = Math.round(14 + v * 40)" /></div>
+              <div class="row"><div class="label">行间距</div><Slider class="row-slider" :model-value="settings.lyricLineGap / 60" :format="(v) => `${Math.round(v * 60)}px`" @change="(v) => settings.lyricLineGap = Math.round(v * 60)" /></div>
+              <div class="row"><div class="label">当前行缩放</div><Slider class="row-slider" :model-value="(settings.lyricZoom - 1) / 0.6" :format="(v) => `${(1 + v * 0.6).toFixed(2)}x`" @change="(v) => settings.lyricZoom = +(1 + v * 0.6).toFixed(2)" /></div>
+              <div class="row"><div class="label">逐行延迟</div><Slider class="row-slider" :model-value="settings.lyricStagger" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.lyricStagger = +v.toFixed(2)" /></div>
+
+              <div class="row subgroup"><div class="label subgroup-title">颜色</div></div>
+              <template v-for="grp in LYRIC_COLOR_GROUPS" :key="grp.group">
+                <div class="row sub-subgroup-title">{{ grp.group }}</div>
+                <div v-for="item in grp.items" :key="item.key" class="row">
+                  <div class="label">{{ item.label }}</div>
+                  <label class="color-chip" :title="`点击修改${item.label}`">
+                    <input type="color" :value="toHex((settings as any)[item.key])" @input="(settings as any)[item.key] = ($event.target as HTMLInputElement).value" />
+                    <span class="color-chip-swatch" :style="{ background: (settings as any)[item.key] }"></span>
+                    <span class="color-chip-value">{{ (settings as any)[item.key] }}</span>
+                  </label>
                 </div>
-              </div>
-              <div class="row">
-                <div class="label">逐行延迟</div>
-                <Slider class="row-slider" :model-value="settings.lyricStagger" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.lyricStagger = +v.toFixed(2)" />
-              </div>
-              <div class="row">
-                <div class="label">动画曲线</div>
-                <div class="seg">
-                  <button
-                    v-for="m in ['smooth', 'swift', 'bouncy', 'soft', 'spring'] as const"
-                    :key="m"
-                    :class="{ active: settings.animationTiming === m }"
-                    @click="settings.animationTiming = m"
-                  >{{ m === 'smooth' ? '平滑' : m === 'swift' ? '迅捷' : m === 'bouncy' ? '弹跳' : m === 'soft' ? '柔和' : '弹簧' }}</button>
-                </div>
-              </div>
+              </template>
+
+              <div class="row subgroup"><div class="label subgroup-title">效果</div></div>
+              <div class="row"><div class="label">非活跃行模糊</div><Slider class="row-slider" :model-value="settings.lyricBlur / 20" :format="(v) => `${Math.round(v * 20)}px`" @change="(v) => settings.lyricBlur = Math.round(v * 20)" /></div>
+              <div class="row"><div class="label">非活跃行淡出</div><Slider class="row-slider" :model-value="settings.lyricFade" :format="(v) => `${Math.round(v * 100)}%`" @change="(v) => settings.lyricFade = +v.toFixed(2)" /></div>
+              <div class="row"><div class="label">动画曲线</div><div class="seg"><button v-for="m in ['smooth', 'swift', 'bouncy', 'soft', 'spring'] as const" :key="m" :class="{ active: settings.animationTiming === m }" @click="settings.animationTiming = m">{{ m === 'smooth' ? '平滑' : m === 'swift' ? '迅捷' : m === 'bouncy' ? '弹跳' : m === 'soft' ? '柔和' : '弹簧' }}</button></div></div>
+
+              <div class="row subgroup"><div class="label subgroup-title">3D 旋转</div></div>
+              <div class="row toggle"><div class="label">启用 3D 旋转</div><button class="switch" :class="{ on: settings.lyricRotate }" @click="settings.lyricRotate = !settings.lyricRotate" /></div>
+              <div class="row"><div class="label">旋转曲率</div><Slider class="row-slider" :model-value="settings.rotateCurvature / 90" :format="(v) => `${Math.round(v * 90)}`" @change="(v) => settings.rotateCurvature = Math.round(v * 90)" /></div>
+              <div v-if="settings.lyricRotate" class="row"><div class="label">旋转歌词大小</div><Slider class="row-slider" :model-value="(settings.rotateLyricFontSize - 14) / 40" :format="(v) => `${Math.round(14 + v * 40)}px`" @change="(v) => settings.rotateLyricFontSize = Math.round(14 + v * 40)" /></div>
+              <div v-if="settings.lyricRotate" class="row"><div class="label">旋转歌词间距</div><Slider class="row-slider" :model-value="settings.rotateLyricLineGap / 80" :format="(v) => `${Math.round(v * 80)}px`" @change="(v) => settings.rotateLyricLineGap = Math.round(v * 80)" /></div>
             </section>
 
             <!-- Font -->
@@ -669,6 +612,12 @@ onMounted(async () => {
   color: var(--accent);
   text-transform: uppercase;
 }
+.row.sub-subgroup-title { padding: 6px 0 2px; border-bottom: none; font-size: 11px; font-weight: 500; color: var(--text-tertiary); letter-spacing: 0.3px; }
+.color-chip { position: relative; display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 4px; border-radius: var(--radius-sm, 8px); background: var(--bg-elev-3); border: 1px solid var(--border); cursor: pointer; transition: border-color 0.15s, background 0.15s; flex-shrink: 0; }
+.color-chip:hover { border-color: var(--accent); background: var(--bg-hover); }
+.color-chip input[type="color"] { position: absolute; width: 0; height: 0; opacity: 0; pointer-events: none; border: none; }
+.color-chip-swatch { width: 22px; height: 22px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, 0.2); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); display: block; flex-shrink: 0; }
+.color-chip-value { font-size: 11px; font-family: var(--font-mono, monospace); color: var(--text-secondary); white-space: nowrap; letter-spacing: 0.2px; }
 .row.toggle .label {
   font-size: 13px;
   color: var(--text);

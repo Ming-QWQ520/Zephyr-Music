@@ -7,7 +7,17 @@ function fmt(level: string, tag: string, msg: string, data?: any): string {
   if (data !== undefined) { try { line += " " + (typeof data === "string" ? data : JSON.stringify(data)); } catch { line += " " + String(data); } }
   return line;
 }
+import { storeGetSync } from "@/composables/useStore";
+
+function debugEnabled(): boolean {
+  try {
+    const raw = storeGetSync("rnp-settings");
+    if (!raw) return false;
+    return JSON.parse(raw).debugLog === true;
+  } catch { return false; }
+}
 async function write(level: string, tag: string, msg: string, data?: any) {
+  if (level === "DEBUG" && !debugEnabled()) return;
   const line = fmt(level, tag, msg, data);
   if (level === "ERROR") console.error(line); else if (level === "WARN") console.warn(line); else console.log(line);
   try { const mod = await import("@tauri-apps/api/core"); await mod.invoke("write_log", { message: line }); } catch {}

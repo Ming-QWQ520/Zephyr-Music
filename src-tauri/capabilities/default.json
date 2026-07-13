@@ -30,6 +30,8 @@
     {
       "identifier": "fs:scope",
       "allow": [{ "path": "**" }]
-    }
+    },
+    "store:default",
+    "core:path:default"
   ]
 }

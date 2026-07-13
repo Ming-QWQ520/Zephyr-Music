@@ -11,6 +11,7 @@
  *   - 字体缩放：首页内容缩放
  */
 import { reactive, watch } from "vue";
+import { storeSetSync, storeGetSync } from "@/composables/useStore";
 
 export type HomeBgType = "none" | "image" | "gradient";
 
@@ -54,7 +55,7 @@ let cached: HomeSettings | null = null;
 export function loadHomeSettings(): HomeSettings {
   if (cached) return cached;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storeGetSync(STORAGE_KEY);
     if (!raw) return (cached = { ...DEFAULT_HOME_SETTINGS });
     const parsed = JSON.parse(raw);
     cached = { ...DEFAULT_HOME_SETTINGS, ...parsed } as HomeSettings;
@@ -66,7 +67,7 @@ export function loadHomeSettings(): HomeSettings {
 
 export function saveHomeSettings(s: HomeSettings) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+    storeSetSync(STORAGE_KEY, JSON.stringify(s));
   } catch {
     /* ignore */
   }
