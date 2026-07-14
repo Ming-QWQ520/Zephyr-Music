@@ -87,7 +87,7 @@ Zephyr-Music/
 
 ---
 
-## 🚀 开发与构建
+## 🚀 开发与构建(请 clone WIP分支)
 
 ### 环境要求
 - [Node.js](https://nodejs.org/) 18+
