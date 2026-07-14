@@ -32,6 +32,10 @@ md5 = "0.7"
 rand = "0.8"
 flate2 = "1"
 num-bigint = "0.4"
+# 安全持久化：系统凭据库存储加密密钥 + AES-GCM 加密 cookie
+keyring = "3"
+aes-gcm = "0.10"
+base64 = "0.22"
 # 显式声明 tokio（带 time feature），用于 ncbl_scrobble_v1 中的异步非阻塞 sleep。
 # 避免 std::thread::sleep 阻塞 Tauri async 运行时。
 tokio = { version = "1", features = ["time"] }

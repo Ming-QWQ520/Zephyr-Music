@@ -6,7 +6,7 @@
  *
  * 本模块负责：
  *   - DEFAULT_SETTINGS 默认值
- *   - loadSettings / saveSettings 持久化（localStorage key: rnp-settings）
+ *   - loadSettings / saveSettings 持久化（player store → data/player/settings.json，key: rnp-settings）
  *   - 单例响应式 _settings + watch（同步 CSS 变量、GPU 加速类、低延迟模式）
  *   - useSettings() 返回 { settings, defaults }
  */
@@ -16,7 +16,7 @@ import type {
   VisualizerStyle, VisualizerColor, LyricAlign,
   AnimationTiming, FontFamily, Scene3D,
 } from "@/types";
-import { storeSetSync, storeGetSync, initStores } from "@/composables/useStore";
+import { playerSetSync, playerGetSync, initPlayerStore } from "@/composables/useStore";
 
 // 重新导出类型别名，保持与原 SettingsPanel.vue 一致的对外 API
 export type {
@@ -177,7 +177,7 @@ let cached: PlayerSettings | null = null;
 export function loadSettings(): PlayerSettings {
   if (cached) return cached;
   try {
-    const raw = storeGetSync(STORAGE_KEY);
+    const raw = playerGetSync(STORAGE_KEY);
     if (!raw) return (cached = { ...DEFAULT_SETTINGS });
     const parsed = JSON.parse(raw);
     // Migrate legacy "karaokeAnimation" setting → new visualizer settings.
@@ -224,7 +224,7 @@ export function loadSettings(): PlayerSettings {
 
 export function saveSettings(s: PlayerSettings) {
   try {
-    storeSetSync(STORAGE_KEY, JSON.stringify(s));
+    playerSetSync(STORAGE_KEY, JSON.stringify(s));
   } catch {
     /* ignore errors */
   }
@@ -280,12 +280,12 @@ export function useSettings() {
 }
 
 /**
- * 异步重新加载设置：从 store 读取最新值并更新响应式 settings。
- * 在 initStores() 完成后调用，确保 store 数据加载到内存缓存后再读取。
+ * 异步重新加载设置：从 player store 读取最新值并更新响应式 settings。
+ * 在 initPlayerStore() 完成后调用，确保 player store 数据加载到内存缓存后再读取。
  * 这样首次启动时能正确读取持久化数据（store 是异步加载的）。
  */
 export async function reloadSettingsFromStore() {
-  await initStores();
+  await initPlayerStore();
   const fresh = loadSettingsFromStore();
   // 用 store 中的值更新响应式 settings（保留 watch 不会触发的字段）
   for (const key of Object.keys(fresh)) {
@@ -293,10 +293,10 @@ export async function reloadSettingsFromStore() {
   }
 }
 
-/** 从 store 重新读取（不走 cached，强制刷新） */
+/** 从 player store 重新读取（不走 cached，强制刷新） */
 function loadSettingsFromStore(): PlayerSettings {
   try {
-    const raw = storeGetSync(STORAGE_KEY);
+    const raw = playerGetSync(STORAGE_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw);
     if (!parsed._v || parsed._v !== SETTINGS_VERSION) {

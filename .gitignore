@@ -58,3 +58,8 @@ Thumbs.db
 src-tauri/icons/android/
 src-tauri/icons/ios/
 bun.lock
+
+# === Local cross-compile artifacts (libgcc→libunwind workaround) ===
+# These binary .a files are copied locally for LLVM-MinGW linking;
+# they are NOT source code and must not be committed.
+libunwind.a

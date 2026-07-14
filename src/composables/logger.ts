@@ -7,11 +7,11 @@ function fmt(level: string, tag: string, msg: string, data?: any): string {
   if (data !== undefined) { try { line += " " + (typeof data === "string" ? data : JSON.stringify(data)); } catch { line += " " + String(data); } }
   return line;
 }
-import { storeGetSync } from "@/composables/useStore";
+import { playerGetSync } from "@/composables/useStore";
 
 function debugEnabled(): boolean {
   try {
-    const raw = storeGetSync("rnp-settings");
+    const raw = playerGetSync("rnp-settings");
     if (!raw) return false;
     return JSON.parse(raw).debugLog === true;
   } catch { return false; }

@@ -231,7 +231,6 @@ export class ThreeScene3D {
   private rafId = 0;
   private prevTime = 0;
   private baseFov = 45;
-  private preset: Exclude<Scene3D, "off"> = "silk";
   private alpha = 0;
   private targetAlpha = 1;
   private mouse = new THREE.Vector2(-999, -999);
@@ -292,7 +291,6 @@ export class ThreeScene3D {
   setAnalysisCallback(cb: () => Scene3DAnalysis) { this.analysisCb = cb; }
 
   setPreset(p: Exclude<Scene3D, "off">) {
-    this.preset = p;
     this.uniforms.uPreset.value = PRESET_INDEX[p];
     if (p === "silk") { this.userRadius = 6.6; this.userPhi = 0.08; this.userTheta = 0; }
   }

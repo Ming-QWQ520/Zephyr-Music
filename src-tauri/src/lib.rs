@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 mod netease_report;
+mod secure_store;
 
 struct LogFile(Mutex<Option<String>>);
 
@@ -287,7 +288,13 @@ pub fn run() {
             rodio_is_playing,
             rodio_stop,
             rodio_seek,
-            netease_report::netease_report_playback
+            netease_report::netease_report_playback,
+            secure_store::get_store_password,
+            secure_store::get_app_data_dir,
+            secure_store::save_cookies_encrypted,
+            secure_store::load_cookies_decrypted,
+            secure_store::save_playlist_json,
+            secure_store::load_playlist_json
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

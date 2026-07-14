@@ -7,8 +7,12 @@ import { useNeteaseAuth } from "@/composables/useNeteaseAuth";
 import { useNeteaseUser, formatCreateTime, genderText, regionText } from "@/composables/useNeteaseUser";
 import { useWindowControls } from "@/composables/useWindowControls";
 import { useHomeSettings } from "@/composables/useHomeSettings";
-import { initStores } from "@/composables/useStore";
+import { initStores, initPlayerStore, flushPlayerStore } from "@/composables/useStore";
 import { reloadSettingsFromStore } from "@/composables/useSettings";
+import { initSecureCookie, flushSecureCookie } from "@/composables/useSecureCookie";
+import { initSessionCache, flushSession } from "@/stores/player";
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import Sidebar from "@/components/Sidebar.vue";
 import GlobalSearchBar from "@/components/GlobalSearchBar.vue";
 import SearchView from "@/components/SearchView.vue";
@@ -127,13 +131,49 @@ function toggleNowPlaying() {
 onMounted(() => {
   log.init();
   log.info("app", "booted");
-  // 初始化 tauri-plugin-store，加载持久化数据到内存缓存
-  // 然后重新读取设置，确保首次启动时能正确加载 store 中的值
-  initStores().then(() => {
+  // 持久化初始化链（顺序很重要）：
+  //   1. get_app_data_dir  — Rust 端同步创建 data/、data/cookie/、data/player/ 目录
+  //   2. initStores        — 加载 data/settings.json（首页设置等）到内存缓存
+  //   3. initPlayerStore   — 加载 data/player/settings.json（播放器设置）到内存缓存
+  //   4. reloadSettings    — 从 player store 刷新播放器设置到响应式状态
+  //   5. initSecureCookie  — 生成/读取系统凭据库密钥，解密 data/cookie/cookies.dat
+  //   6. initSessionCache  — 读取 data/playlist.json（退出前的歌单）到内存缓存
+  //   7. restoreSession    — 将缓存应用到 store 状态
+  //   8. restoreLastSong   — 恢复上次播放的歌曲（重新获取 URL/歌词）
+  //   9. checkNeLogin      — cookie 就绪后再检查登录状态
+  (async () => {
+    try {
+      await invoke<string>("get_app_data_dir");
+    } catch (e) {
+      log.warn("app", "get_app_data_dir failed", { error: String(e) });
+    }
+    await initStores();
+    log.info("app", "settings store loaded");
+    await initPlayerStore();
     reloadSettingsFromStore();
-    log.info("app", "store loaded");
-  });
-  checkNeLogin();
+    log.info("app", "player settings loaded");
+    await initSecureCookie();
+    log.info("app", "secure cookie loaded");
+    await initSessionCache();
+    const restored = store.restoreSession();
+    log.info("app", "session restored", { hasSong: restored });
+    restoreLastSong();
+    checkNeLogin();
+  })();
+  // 窗口关闭前安全落盘：阻止默认关闭，等待 playlist/cookie/player-settings 写盘完成后再销毁窗口
+  getCurrentWindow().onCloseRequested(async (event) => {
+    event.preventDefault();
+    try {
+      store.saveSession();
+      await flushSession();
+      await flushSecureCookie();
+      await flushPlayerStore();
+      log.info("app", "flushed on close, destroying");
+    } catch (e) {
+      log.warn("app", "flush on close failed", { error: String(e) });
+    }
+    await getCurrentWindow().destroy();
+  }).then((un) => { unlistenClose = un; }).catch(() => {});
   // 全局禁用原生右键菜单（返回、刷新、另存为、打印等）
   document.addEventListener("contextmenu", (e) => {
     e.preventDefault();
@@ -200,6 +240,8 @@ onMounted(() => {
       }
     }
   });
+  // 上次播放歌曲的恢复逻辑（提取为函数，供上方初始化链在 session 恢复后调用）
+  function restoreLastSong() {
   // 恢复上次播放的歌曲：重新获取 URL 和歌词，获取成功后自动开始播放并恢复到上次进度
   const song = store.currentSong;
   const savedTime = store.currentTime;  // 保存上次播放位置，URL 获取过程中会被重置
@@ -274,12 +316,15 @@ onMounted(() => {
       }
     }
   }
+  }
   sessionTimer = setInterval(() => store.saveSession(), 10000);
   window.addEventListener("beforeunload", () => store.saveSession());
 });
 let sessionTimer: ReturnType<typeof setInterval> | null = null;
+let unlistenClose: (() => void) | null = null;
 onUnmounted(() => {
   if (sessionTimer) clearInterval(sessionTimer);
+  if (unlistenClose) unlistenClose();
   store.saveSession();
 });
 </script>

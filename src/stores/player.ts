@@ -4,9 +4,7 @@ import { fetchLyrics } from "@/api/music";
 import { songUrlV1 as songUrl, lyricNew, lyric, parseYrc } from "@/api/netease";
 import { log } from "@/composables/logger";
 import { useSettings } from "@/composables/useSettings";
-import { storeGetSync, storeSetSync } from "@/composables/useStore";
-
-const SESSION_KEY = "zephyr-session";
+import { invoke } from "@tauri-apps/api/core";
 
 interface SessionData {
   queue: Song[];
@@ -16,18 +14,50 @@ interface SessionData {
   muted: boolean;
 }
 
+/**
+ * 播放列表（退出前的歌单数据）持久化到 exe 所在目录 data/playlist.json（明文 JSON）。
+ *
+ * 工作方式（与 settings store 一致的"内存缓存 + 异步落盘"模式）：
+ *   - state() 同步读取 sessionCache（首次为 null → 空队列）
+ *   - App.vue 启动时调用 initSessionCache() 从 playlist.json 异步加载到 sessionCache
+ *   - 随后调用 store.restoreSession() 将缓存应用到 store 状态并触发歌曲恢复
+ *   - saveSession() 同步更新缓存 + 异步调用 Rust save_playlist_json 落盘
+ *
+ * 落盘使用 Rust 端同步 fs::write，保证窗口关闭瞬间也能完成写入。
+ */
+let sessionCache: SessionData | null = null;
+/** 挂起的落盘 Promise（供关闭前 flush 等待） */
+let pendingSave: Promise<void> = Promise.resolve();
+
+/** 同步读取内存缓存（供 state() 初始化使用）。 */
 function loadSession(): SessionData | null {
-  try {
-    const raw = storeGetSync(SESSION_KEY);
-    if (!raw) return null;
-    const d = JSON.parse(raw);
-    if (d.queue && Array.isArray(d.queue) && d.queue.length > 0) return d;
-  } catch { /* ignore */ }
-  return null;
+  return sessionCache;
 }
 
-function saveSession(data: SessionData) {
-  try { storeSetSync(SESSION_KEY, JSON.stringify(data)); } catch { /* ignore */ }
+/** 启动时调用：从 data/playlist.json 异步加载到 sessionCache。 */
+export async function initSessionCache(): Promise<void> {
+  try {
+    const raw = await invoke<string | null>("load_playlist_json");
+    if (!raw) return;
+    const d = JSON.parse(raw);
+    if (d.queue && Array.isArray(d.queue) && d.queue.length > 0) {
+      sessionCache = d as SessionData;
+    }
+  } catch (e) {
+    console.warn("[session] load playlist.json failed:", e);
+  }
+}
+
+/** 异步落盘到 data/playlist.json（通过 Rust 同步 fs::write）。 */
+function saveSessionToDisk(data: SessionData): void {
+  pendingSave = invoke("save_playlist_json", { json: JSON.stringify(data) })
+    .catch((e) => console.warn("[session] save playlist.json failed:", e))
+    .then(() => undefined);
+}
+
+/** 等待所有挂起的落盘完成（供窗口关闭前调用）。 */
+export function flushSession(): Promise<void> {
+  return pendingSave;
 }
 
 interface State {
@@ -429,9 +459,10 @@ export const usePlayerStore = defineStore("player", {
       this.history.unshift(song);
       if (this.history.length > 50) this.history.length = 50;
     },
-    /** 保存当前会话到 localStorage（播放队列、进度、音量）。
+    /** 保存当前会话到 data/playlist.json（播放队列、进度、音量）。
      *  只保存歌曲 ID、名称、歌手等最小信息，不保存 URL（URL 会过期）。
-     *  恢复时通过 _ensureNeteaseUrl 重新获取 URL。 */
+     *  恢复时通过 _ensureNeteaseUrl 重新获取 URL。
+     *  同步更新内存缓存 + 异步调用 Rust 落盘（不阻塞 UI）。 */
     saveSession() {
       const slimQueue = this.queue.map((s) => ({
         id: s.id,
@@ -444,13 +475,27 @@ export const usePlayerStore = defineStore("player", {
         url: "", // 清空 URL，恢复时重新获取
         lrc: "",
       }));
-      saveSession({
+      const data: SessionData = {
         queue: slimQueue,
         currentIndex: this.currentIndex,
         currentTime: this.currentTime,
         volume: this.volume,
         muted: this.muted,
-      });
+      };
+      sessionCache = data;
+      saveSessionToDisk(data);
+    },
+    /** 将 initSessionCache() 加载到的缓存应用到 store 状态。
+     *  仅在当前队列为空（冷启动）时应用，避免覆盖运行中的状态。
+     *  返回是否有歌曲需要恢复（供 App.vue 触发 restoreLastSong）。 */
+    restoreSession(): boolean {
+      if (!sessionCache || this.queue.length > 0) return false;
+      this.queue = sessionCache.queue;
+      this.currentIndex = sessionCache.currentIndex;
+      this.currentTime = sessionCache.currentTime;
+      this.volume = sessionCache.volume;
+      this.muted = sessionCache.muted;
+      return !!this.currentSong;
     },
   },
 });

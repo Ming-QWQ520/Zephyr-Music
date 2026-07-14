@@ -1,8 +1,8 @@
 /**
  * 网易云音乐 API 核心基础设施
  *
- * - API_BASE / COOKIE_KEY 常量
- * - cookie 读写
+ * - API_BASE 常量
+ * - cookie 读写（加密持久化）
  * - apiGet/apiPost 通用请求（自动解包 api-enhanced 的 data 层）
  * - 共享缓存状态（_cachedUser / _cachedPlaylists）
  *
@@ -12,26 +12,30 @@ import { ref } from "vue";
 import { log } from "@/composables/logger";
 import { truncateForLog } from "@/utils/format";
 import type { NeteasePlaylist, NeteaseUser } from "@/types";
-import { storeGetSync, storeSetSync } from "@/composables/useStore";
+import { getSecureCookie, setSecureCookie, clearSecureCookie } from "@/composables/useSecureCookie";
 
 /** 网易云 API 基础地址（api-enhanced 服务） */
 export const API_BASE = "https://musicapi.mingqwq.top";
-/** store 中存储 cookie 的 key */
-export const COOKIE_KEY = "netease-cookie";
 /** 日志 tag */
 export const TAG = "netease-api";
 
-/** 读取本地保存的 cookie */
+/**
+ * Cookie 持久化：使用系统凭据库密钥 + AES-256-GCM 加密存储于
+ * exe 所在目录 data/cookie/cookies.dat（见 composables/useSecureCookie.ts）。
+ * 启动时由 App.vue 调用 initSecureCookie() 解密载入到内存缓存。
+ */
+
+/** 读取本地保存的 cookie（同步，从内存缓存读取） */
 export function getCookie(): string {
-  try { return storeGetSync(COOKIE_KEY) || ""; } catch { return ""; }
+  return getSecureCookie();
 }
-/** 保存 cookie 到本地 */
+/** 保存 cookie 到本地（同步更新缓存 + 异步加密落盘） */
 export function setCookie(cookie: string): void {
-  try { storeSetSync(COOKIE_KEY, cookie); } catch { /* ignore */ }
+  setSecureCookie(cookie);
 }
 /** 清除本地 cookie（退出登录） */
 export function clearCookie(): void {
-  try { storeSetSync(COOKIE_KEY, ""); } catch { /* ignore */ }
+  clearSecureCookie();
 }
 
 /**
