@@ -18,7 +18,7 @@ function normalizeSong(raw: any): Song | null {
   const artist = raw.artist || raw.author || "未知歌手";
   const url = raw.url;
   if (!url) return null;
-  const id = (url.match(/[?&]id=([^&]+)/) || [,`${name}-${artist}`])[1];
+  const id = url.match(/[?&]id=([^&]+)/)?.[1] || `${name}-${artist}`;
   return { id, name: String(name), artist: String(artist), url: String(url), pic: raw.pic ? String(raw.pic) : "", lrc: raw.lrc ? String(raw.lrc) : "", server: raw.server };
 }
 

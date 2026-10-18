@@ -2,7 +2,9 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
@@ -13,13 +15,23 @@
     "core:window:allow-is-maximized",
     "core:window:allow-unmaximize",
     "core:window:allow-maximize",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
+    "core:window:allow-show",
+    "core:window:allow-hide",
     "http:default",
     {
       "identifier": "http:allow-fetch",
       "allow": [
-        { "url": "https://api.qijieya.cn/*" },
-        { "url": "https://*" },
-        { "url": "http://*" }
+        {
+          "url": "https://api.qijieya.cn/*"
+        },
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        }
       ]
     },
     "dialog:default",
@@ -30,7 +42,11 @@
     "fs:allow-read-text-file",
     {
       "identifier": "fs:scope",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        {
+          "path": "**"
+        }
+      ]
     },
     "store:default",
     "core:path:default"

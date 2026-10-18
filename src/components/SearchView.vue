@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
-import { searchSongs, neteaseSongToSong, songDetail, songLike, getCachedLikeList, addLikeCache, removeLikeCache, getCachedUser, playlistTracks, type NeteasePlaylist } from "@/api/netease";
+import { searchSongs, neteaseSongToSong, songDetail, songLike, getCachedLikeList, addLikeCache, removeLikeCache, getCachedUser, playlistTracks, searchHotDetail, type NeteasePlaylist } from "@/api/netease";
 import { pickLocalAudioFiles } from "@/api/localMusic";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
+import { formatCount } from "@/utils/format";
 import Icon from "@/components/Icon.vue";
+import SongBadge from "@/components/SongBadge.vue";
 import type { Song } from "@/types";
 
 const store = usePlayerStore();
@@ -15,6 +17,41 @@ const results = ref<Song[]>([]);
 const loading = ref(false);
 const errorMsg = ref("");
 const localOpen = ref(false);
+let searchRequestId = 0;
+
+// 热搜列表
+interface HotSearchItem { searchWord: string; score: number; content?: string; iconType?: number; iconUrl?: string; url?: string; alg?: string }
+const hotSearchList = ref<HotSearchItem[]>([]);
+const hotSearchLoading = ref(false);
+
+// 搜索建议（预留）
+// interface SuggestItem { type: string; name: string; id?: number; picUrl?: string; artist?: string }
+// const suggestList = ref<SuggestItem[]>([]);
+// const suggestLoading = ref(false);
+
+/** 加载热搜列表 */
+async function loadHotSearch() {
+  hotSearchLoading.value = true;
+  try {
+    const res = await searchHotDetail();
+    hotSearchList.value = res.data || [];
+    log.info("searchview", "hot search loaded", { count: hotSearchList.value.length });
+  } catch (e) {
+    log.warn("searchview", "load hot search failed", { error: String(e) });
+  } finally {
+    hotSearchLoading.value = false;
+  }
+}
+
+/** loadSuggest reserved for future use */
+
+/** 点击热搜项 → 执行搜索 */
+function searchHotWord(word: string) {
+  store.searchKeyword = word;
+  runSearch(word);
+}
+
+/** searchSuggestItem reserved for future use */
 /** 当前列表歌曲的喜欢状态集合（neteaseId → liked） */
 const songLikedSet = ref<Set<number>>(new Set());
 /** 搜索类型：1=单曲 */
@@ -40,6 +77,20 @@ function onContextMenu(e: MouseEvent, song: Song) {
   e.stopPropagation();
   contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, song };
   showPlayNextSub.value = false;
+  // 自适应弹出位置：rAF 后测量实际菜单尺寸并调整，确保不溢出屏幕
+  requestAnimationFrame(() => {
+    const els = document.querySelectorAll(".ctx-menu");
+    const el = els[els.length - 1] as HTMLElement | null;
+    if (!el) return;
+    const mw = el.offsetWidth, mh = el.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = e.clientX, y = e.clientY;
+    if (x + mw > vw - 8) x = vw - mw - 8;
+    if (y + mh > vh - 8) y = vh - mh - 8;
+    if (x < 8) x = 8;
+    if (y < 8) y = 8;
+    contextMenu.value = { visible: true, x, y, song };
+  });
   if (song.source === "netease" && song.neteaseId) {
     getCachedLikeList().then(set => { ctxSongLiked.value = set.has(song.neteaseId!); }).catch(() => {});
   } else { ctxSongLiked.value = false; }
@@ -87,11 +138,16 @@ function onDocClick() { closeContextMenu(); }
 onMounted(() => {
   document.addEventListener("click", onDocClick);
   if (store.searchKeyword) runSearch(store.searchKeyword);
+  else loadHotSearch();
 });
-onUnmounted(() => { document.removeEventListener("click", onDocClick); });
+onUnmounted(() => {
+  searchRequestId += 1;
+  document.removeEventListener("click", onDocClick);
+});
 
 async function runSearch(kw: string) {
   const trimmed = kw.trim();
+  const requestId = ++searchRequestId;
   if (!trimmed) {
     results.value = [];
     errorMsg.value = "";
@@ -102,6 +158,7 @@ async function runSearch(kw: string) {
   try {
     // 使用 /search 接口（返回更多结果，含 artists/album/duration）
     const res = await searchSongs(trimmed, 50, 0, searchType.value);
+    if (requestId !== searchRequestId) return;
     const songs = res.result?.songs || [];
     if (songs.length === 0) {
       results.value = [];
@@ -111,35 +168,50 @@ async function runSearch(kw: string) {
       log.info("searchview", "search done", { kw: trimmed, count: results.value.length, hasPic: results.value.filter(s => s.pic).length });
       // 后台加载喜欢状态
       loadSongLikedStatus();
-      // /search 返回的 album 没有 picUrl，用 songDetail 批量补充封面
-      const needCover = results.value.filter(s => !s.pic && s.neteaseId);
-      if (needCover.length > 0) {
-        log.info("searchview", "fetching covers via songDetail", { count: needCover.length });
+      // /search 返回的 album 没有 picUrl 且缺少标识信息，用 songDetail 批量补充封面 + 标识
+      const needDetail = results.value.filter(s => (!s.pic || s.fee === undefined || s.mark === undefined || s.mark === 0) && s.neteaseId);
+      if (needDetail.length > 0) {
+        log.info("searchview", "fetching covers + badges via songDetail", { count: needDetail.length });
         try {
-          const detailRes = await songDetail(needCover.map(s => s.neteaseId!));
-          const detailMap = new Map<number, string>();
+          const detailRes = await songDetail(needDetail.map(s => s.neteaseId!));
+          if (requestId !== searchRequestId) return;
+          const detailMap = new Map<number, { picUrl?: string; fee?: number; mark?: number; hr?: any; sq?: any; maxBrLevel?: string }>();
           for (const ds of (detailRes.songs || [])) {
             let picUrl = ds.al?.picUrl || ds.album?.picUrl || "";
             if (picUrl && !picUrl.includes("?param=")) picUrl += "?param=200x200";
-            if (picUrl && ds.id) detailMap.set(ds.id, picUrl);
+            detailMap.set(ds.id, {
+              picUrl: picUrl || undefined,
+              fee: ds.fee,
+              mark: ds.mark,
+              hr: ds.hr,
+              sq: ds.sq,
+              maxBrLevel: (ds as any).privilege?.maxBrLevel,
+            });
           }
           for (const s of results.value) {
-            if (!s.pic && s.neteaseId && detailMap.has(s.neteaseId)) {
-              s.pic = detailMap.get(s.neteaseId)!;
+            if (s.neteaseId && detailMap.has(s.neteaseId)) {
+              const detail = detailMap.get(s.neteaseId)!;
+              if (!s.pic && detail.picUrl) s.pic = detail.picUrl;
+              if (s.fee === undefined && detail.fee !== undefined) s.fee = detail.fee;
+              if (s.mark === undefined && detail.mark !== undefined) s.mark = detail.mark;
+              if (detail.hr) s.hasHires = true;
+              if (detail.sq) s.hasSq = true;
+              if (detail.maxBrLevel && !s.maxBrLevel) s.maxBrLevel = detail.maxBrLevel;
             }
           }
-          log.info("searchview", "covers fetched", { got: detailMap.size });
+          log.info("searchview", "covers + badges fetched", { got: detailMap.size });
         } catch (e) {
-          log.warn("searchview", "fetch covers failed", { error: String(e) });
+          log.warn("searchview", "fetch covers + badges failed", { error: String(e) });
         }
       }
     }
   } catch (e) {
+    if (requestId !== searchRequestId) return;
     results.value = [];
     errorMsg.value = String(e instanceof Error ? e.message : e);
     log.error("searchview", "search failed", { error: String(e) });
   } finally {
-    loading.value = false;
+    if (requestId === searchRequestId) loading.value = false;
   }
 }
 
@@ -205,10 +277,6 @@ function openAddToPlaylistDialogForRow(song: Song) {
   import("@/api/netease").then(m => m.getCachedPlaylists()).then(pls => { playlists.value = pls; });
 }
 
-onMounted(() => {
-  if (store.searchKeyword) runSearch(store.searchKeyword);
-});
-
 watch(
   () => store.searchKeyword,
   (kw) => {
@@ -244,7 +312,34 @@ watch(
       >{{ t.label }}</button>
     </div>
 
-    <div class="results nice-scroll">
+    <!-- 热搜/建议（无搜索结果时显示） -->
+    <div v-if="!results.length && !loading && !errorMsg" class="hot-section nice-scroll">
+      <!-- 热搜榜 -->
+      <div v-if="hotSearchList.length" class="hot-block">
+        <h3 class="hot-title">热搜榜</h3>
+        <div class="hot-grid">
+          <button v-for="(item, idx) in hotSearchList.slice(0, 18)" :key="item.searchWord"
+            class="hot-item" @click="searchHotWord(item.searchWord)">
+            <span class="hot-idx" :class="{ 'hot-top': idx < 3 }">{{ idx + 1 }}</span>
+            <span class="hot-word truncate">{{ item.searchWord }}</span>
+            <span v-if="item.iconType === 1" class="hot-badge hot">HOT</span>
+            <span v-if="item.iconType === 2" class="hot-badge new-badge">NEW</span>
+            <span v-if="item.iconType === 3" class="hot-badge recommend">荐</span>
+            <span v-if="item.score" class="hot-score">{{ formatCount(item.score) }}</span>
+          </button>
+        </div>
+      </div>
+      <div v-else-if="hotSearchLoading" class="state">
+        <span class="spinner" /><p>加载热搜中...</p>
+      </div>
+      <div v-else class="state empty-state">
+        <Icon name="search" :size="42" />
+        <p>在顶部搜索栏输入歌曲名或歌手名</p>
+        <p class="hint">或点击右上角"打开本地文件"。</p>
+      </div>
+    </div>
+
+    <div v-else class="results nice-scroll">
       <div v-if="loading" class="state">
         <span class="spinner" />
         <p>正在搜索...</p>
@@ -285,7 +380,10 @@ watch(
                 <Icon v-else name="music" :size="14" />
               </div>
               <div class="title-wrap">
-                <div class="title truncate">{{ song.name }}</div>
+                <div class="title-line">
+                  <span class="title truncate">{{ song.name }}</span>
+                  <SongBadge :song="song" size="sm" />
+                </div>
                 <div class="mobile-artist truncate">{{ song.artist }}</div>
               </div>
             </td>
@@ -429,18 +527,18 @@ watch(
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
 }
 .search-type-btn {
   padding: 5px 14px;
   border-radius: 16px;
   font-size: 12px;
   color: var(--text-secondary);
-  background: var(--bg-elev-3);
   transition: all 0.15s;
 }
 .search-type-btn:hover { color: var(--text); }
-.search-type-btn.active { background: var(--accent); color: #fff; font-weight: 600; }
+.search-type-btn.active {  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(5px) saturate(1);
+  color: #fff !important; font-weight: 600; }
 
 .results {
   flex: 1;
@@ -567,6 +665,20 @@ watch(
 .title-wrap {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+}
+.title-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.title-line .title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .title-wrap .title {
   color: var(--text);

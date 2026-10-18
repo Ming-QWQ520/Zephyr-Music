@@ -140,7 +140,16 @@ async fn report_playback(
                 source_type: "track".to_string(),
                 name: "list".to_string(),
             };
-            ncbl_result = Some(ncbl_scrobble_v1(&ctx, &song, &source, play_time, request.is_auto_next.unwrap_or(false)).await?);
+            ncbl_result = Some(
+                ncbl_scrobble_v1(
+                    &ctx,
+                    &song,
+                    &source,
+                    play_time,
+                    request.is_auto_next.unwrap_or(false),
+                )
+                .await?,
+            );
         }
     }
 
@@ -293,11 +302,12 @@ impl EapiClient {
 }
 
 fn eapi_encrypt(path: &str, params: &Value) -> String {
+    use md5::{Md5, Digest};
     let payload = compact_json(params);
-    let digest = format!(
-        "{:x}",
-        md5::compute(format!("nobody{path}use{payload}md5forencrypt"))
-    );
+    let mut hasher = Md5::new();
+    hasher.update(format!("nobody{path}use{payload}md5forencrypt").as_bytes());
+    let digest_bytes = hasher.finalize();
+    let digest: String = digest_bytes.iter().map(|b| format!("{:02x}", b)).collect();
     let raw = format!("{path}-{EAPI_SALT}-{payload}-{EAPI_SALT}-{digest}");
     let mut data = pkcs7_pad(raw.as_bytes(), 16);
     let cipher = Aes128::new(GenericArray::from_slice(EAPI_KEY));
@@ -422,7 +432,7 @@ async fn ncbl_scrobble_v1(
 
     // 短暂等待 2 秒模拟真实客户端的 PLV→PLD 间隔（避免完全瞬时触发风控），
     // 但不再等待 30 秒——网易云判定时长靠 PLD 的 time 字段，不靠上传间隔。
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
     let pld = build_pld(ctx, song, source, played, is_auto_next);
     let pld_body = build_ncbl_records(&[(ts, "_pld", pld)]);
@@ -484,7 +494,13 @@ fn build_plv(ctx: &NcblContext, song: &NcblSong, source: &NcblSource) -> Value {
     })
 }
 
-fn build_pld(ctx: &NcblContext, song: &NcblSong, source: &NcblSource, played: u32, _is_auto_next: bool) -> Value {
+fn build_pld(
+    ctx: &NcblContext,
+    song: &NcblSong,
+    source: &NcblSource,
+    played: u32,
+    _is_auto_next: bool,
+) -> Value {
     let now = chrono::Local::now().timestamp_millis();
     let add_refer = format!(
         "[F:63][{now}#616#{}#{}#c9156c3][e][2][92][btn_pc_cover_play|cell_pc_songlist_song:6|page_pc_songlist_songflow|page_mine_like_music][:::|{}:song:x:x|:::|{}:list::]",
@@ -876,6 +892,7 @@ mod tests {
             level: Some("exhigh".to_string()),
             mode: Some("both".to_string()),
             dry_run: Some(true),
+            is_auto_next: Some(false),
         }))
         .expect("dry-run response");
 
@@ -916,6 +933,7 @@ mod tests {
             level: Some("exhigh".to_string()),
             mode: Some("both".to_string()),
             dry_run: Some(false),
+            is_auto_next: Some(false),
         }))
         .expect("real account e2e response");
 

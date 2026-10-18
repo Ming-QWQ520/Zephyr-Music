@@ -26,19 +26,16 @@ chrono = "0.4"
 urlencoding = "2"
 rodio = "0.19"
 lofty = "0.21"
-reqwest = { version = "0.12", features = ["json", "multipart", "gzip"] }
+reqwest = { version = "0.12", features = ["json", "multipart", "gzip", "stream"] }
+futures-util = "0.3"
 aes = "0.8"
-md5 = "0.7"
+md-5 = "0.10"
 rand = "0.8"
 flate2 = "1"
 num-bigint = "0.4"
-# 安全持久化：系统凭据库存储加密密钥 + AES-GCM 加密 cookie
-keyring = "3"
-aes-gcm = "0.10"
-base64 = "0.22"
 # 显式声明 tokio（带 time feature），用于 ncbl_scrobble_v1 中的异步非阻塞 sleep。
 # 避免 std::thread::sleep 阻塞 Tauri async 运行时。
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "fs"] }
 
 # This feature is enabled by `tauri build` (production). It tells the tauri
 # crate to embed the frontendDist into the binary (custom protocol) instead of

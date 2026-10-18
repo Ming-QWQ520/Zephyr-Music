@@ -53,15 +53,41 @@ export async function recommendSongs(): Promise<{
   return { code: r.code, data: { dailySongs: [] } };
 }
 
-/** 每日推荐歌单（/recommend/resource，需要登录） */
+/** 每日推荐歌单（/recommend/resource，需要登录）。
+ *  /recommend/resource 返回的每项为 { id, name, picUrl, ... }，
+ *  此处统一映射为 NeteasePlaylist 结构（coverImgUrl），供 UI 直接复用。 */
 export async function recommendResource(): Promise<{
   code: number; recommend?: NeteasePlaylist[]; data?: NeteasePlaylist[];
 }> {
   log.info(TAG, "recommendResource()");
-  const r = await apiGet("/recommend/resource");
-  const list = r.recommend || r.data || [];
+  const r = await apiGet<{ code: number; recommend?: any[]; data?: any[] }>("/recommend/resource");
+  const rawList = r.recommend || r.data || [];
+  const list: NeteasePlaylist[] = rawList.map(p => ({
+    id: p.id,
+    name: p.name,
+    coverImgUrl: p.picUrl || p.coverImgUrl || "",
+    trackCount: p.trackCount || 0,
+    playCount: p.playcount ?? p.playCount,
+    creator: p.creator ? { nickname: p.creator.nickname || "" } : undefined,
+  }));
   log.info(TAG, "recommendResource result", { code: r.code, count: list.length });
-  return r;
+  return { code: r.code, recommend: list, data: list } as any;
+}
+
+/** 推荐歌单（/personalized，无需登录）。
+ *  返回 result: [{ id, name, picUrl, playCount }]，转换成 NeteasePlaylist 结构供 UI 复用。 */
+export async function personalizedPlaylists(limit = 12): Promise<NeteasePlaylist[]> {
+  log.info(TAG, "personalizedPlaylists()", { limit });
+  const r = await apiGet<{ code: number; result?: { id: number; name: string; picUrl: string; playCount?: number; trackCount?: number }[] }>("/personalized", { limit });
+  const list = (r.result || []).map(p => ({
+    id: p.id,
+    name: p.name,
+    coverImgUrl: p.picUrl || "",
+    trackCount: p.trackCount || 0,
+    playCount: p.playCount,
+  }));
+  log.info(TAG, "personalizedPlaylists result", { code: r.code, count: list.length });
+  return list;
 }
 
 /** 歌单详情（/playlist/detail） */

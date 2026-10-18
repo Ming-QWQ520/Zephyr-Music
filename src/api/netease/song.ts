@@ -95,6 +95,24 @@ export async function scrobbleV1(
   return r;
 }
 
+/** 私人漫游 / 私人FM（/personal_fm）
+ *  每次返回 1~3 首个性化推荐歌曲（老格式：artists/album/duration 字段）。
+ *  网易云 PC 端漫游即基于此接口：播放中快到队尾时再次调用追加歌曲。 */
+export async function personalFm(): Promise<{ code: number; data: NeteaseSong[] }> {
+  log.info(TAG, "→ personalFm()");
+  const r = await apiGet("/personal_fm");
+  log.info(TAG, "← personalFm result", { code: r.code, count: r.data?.length || 0 });
+  return r;
+}
+
+/** 漫游不感兴趣（/fm_trash）：把歌曲丢进 FM 垃圾桶，之后不再推荐 */
+export async function fmTrash(id: number): Promise<{ code: number }> {
+  log.info(TAG, "→ fmTrash()", { id });
+  const r = await apiGet("/fm_trash", { id });
+  log.info(TAG, "← fmTrash result", { id, code: r.code });
+  return r;
+}
+
 /** 获取用户播放记录（最近播放-歌曲，/record/recent/song） */
 export async function recordRecentSong(limit = 300): Promise<{
   code: number;
@@ -142,6 +160,95 @@ export async function recentListenList(): Promise<{
   const list = r.data || r.list || [];
   log.info("netease-api-music", "← recentListenList result", {
     code: r.code, count: list.length, field: r.data ? "data" : r.list ? "list" : "none",
+  });
+  return r;
+}
+
+/** 副歌时间 / 高潮点（/song/chorus）
+ *  返回 chorus[] 与 data[]（两者结构相同），每项含 startTime / endTime（毫秒）。
+ *  startTime 转换为 m:ss 即歌曲的高潮点。 */
+export interface SongChorus {
+  id: number;
+  startTime: number; // 毫秒
+  endTime: number;   // 毫秒
+  ugcLocked?: number;
+}
+export async function songChorus(id: number): Promise<{
+  code: number;
+  chorus?: SongChorus[];
+  data?: SongChorus[];
+}> {
+  log.info(TAG, "→ songChorus()", { id });
+  const r = await apiGet<{ code: number; chorus?: SongChorus[]; data?: SongChorus[] }>(
+    "/song/chorus",
+    { id }
+  );
+  const list = r.chorus || r.data || [];
+  log.info(TAG, "← songChorus result", {
+    code: r.code, count: list.length,
+    first: list[0] ? { start: list[0].startTime, end: list[0].endTime } : null,
+  });
+  return r;
+}
+
+/** ===== 歌曲百科（/song/wiki/summary，需登录）=====
+ *  返回结构：{ code, data: { blocks: Block[] } }
+ *  blocks 包含 4 块（按 position 排序）：
+ *   - 回忆坐标（MUSIC_MEMORY_MULTI_TWO_GRID）：首次听歌时间 / 听歌次数超越百分比
+ *   - 音乐百科（SONG_PLAY_ABOUT_TAB_SONG_BASIC）：曲风/推荐标签/语种/BPM/乐谱
+ *   - 相似歌曲（LIST_SONG）：20 首相似歌曲
+ *   - 相关歌单（PLAYLIST_MULTI_THREE_GRID）：20 个相关歌单
+ */
+export interface WikiUIElement {
+  mainTitle?: { title: string; action?: any } | null;
+  subTitles?: { title: string; action?: any }[] | null;
+  images?: { imageUrl?: string; title?: string; width?: number; height?: number }[] | null;
+  textLinks?: { text: string | null; url?: string | null }[] | null;
+  descriptions?: { description?: string }[] | null;
+  buttons?: { text?: string; imageUrl?: string | null; action?: { clickAction?: { action?: number; targetUrl?: string } } | null }[] | null;
+}
+
+export interface WikiResource {
+  resourceType: string;
+  resourceId: string | null;
+  uiElement: WikiUIElement | null;
+  resourceExt?: {
+    playCount?: number;
+    musicFirstListenDto?: { timestamp?: string; season?: string; period?: string; date?: string; desc?: string } | null;
+    musicTotalPlayDto?: { playCount?: number; duration?: number; text?: string; desc?: string } | null;
+  } | null;
+  action?: { clickAction?: { action?: number; targetUrl?: string } } | null;
+}
+
+export interface WikiCreative {
+  creativeType?: string | null;
+  uiElement: WikiUIElement | null;
+  resources: WikiResource[];
+}
+
+export interface WikiBlock {
+  showType: string;
+  channel: string;
+  position: string;
+  uiElement: WikiUIElement | null;
+  creatives: WikiCreative[];
+}
+
+export interface SongWikiSummary {
+  code: number;
+  data?: { cursor?: string; blocks?: WikiBlock[] };
+  /** api-enhanced 解包后顶层就是 { cursor, blocks } */
+  cursor?: string;
+  blocks?: WikiBlock[];
+}
+
+export async function songWikiSummary(id: number): Promise<SongWikiSummary> {
+  log.info(TAG, "→ songWikiSummary()", { id });
+  const r = await apiGet<SongWikiSummary>("/song/wiki/summary", { id });
+  const blocks = r.blocks || r.data?.blocks || [];
+  log.info(TAG, "← songWikiSummary result", {
+    code: r.code, blocksCount: blocks.length,
+    blockTitles: blocks.map(b => b?.uiElement?.mainTitle?.title || "").filter(Boolean),
   });
   return r;
 }

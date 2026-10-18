@@ -131,6 +131,7 @@ body.has-wallpaper .recommend-view,
 body.has-wallpaper .library-view,
 body.has-wallpaper .queue-view,
 body.has-wallpaper .song-comments-view,
+body.has-wallpaper .message-view,
 body.has-wallpaper .main-view,
 body.has-wallpaper .sidebar,
 body.has-wallpaper .titlebar {
@@ -142,7 +143,7 @@ body.has-wallpaper .pl-dialog,
 body.has-wallpaper .ctx-menu,
 body.has-wallpaper .ne-dropdown,
 body.has-wallpaper .login-modal {
-  background: var(--bg-elev-3) !important;
+   background: rgba(30, 30, 30, 0.55)
 }
 /* 注意：NowPlayingView (全屏播放界面) 保持自己的背景层（专辑封面模糊/纯色等），
    不被全局壁纸覆盖。np-overlay 不在透明列表中，保持其原有 #000 背景 + rnp-bg 层。 */
@@ -150,8 +151,8 @@ body.has-wallpaper .login-modal {
 body.has-wallpaper .search-view .song-table tbody tr,
 body.has-wallpaper .netease-view .song-trow {
   background: rgba(255, 255, 255, 0.55) !important;
-  backdrop-filter: blur(12px) saturate(1.4);
-  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(5px) saturate(1);
+  -webkit-backdrop-filter: blur(5px) saturate(1);
 }
 [data-color-mode="dark"] body.has-wallpaper .search-view .song-table tbody tr,
 [data-color-mode="dark"] body.has-wallpaper .netease-view .song-trow {
@@ -174,7 +175,8 @@ body.has-wallpaper .netease-view .song-trow {
   display: flex !important;
   gap: 4px !important;
   padding: 3px !important;
-  background: var(--bg-elev-1) !important;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(3px) saturate(1);
   border-radius: var(--radius) !important;
   width: fit-content !important;
 }
@@ -188,11 +190,12 @@ body.has-wallpaper .netease-view .song-trow {
 }
 .search-type-btn:hover {
   color: var(--text) !important;
-  background: var(--bg-hover) !important;
+  background: rgba(255, 255, 255, 0.3) !important;
 }
 .search-type-btn.active {
-  background: var(--color-tab-active) !important;
-  color: var(--color-tab-active-text) !important;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(5px) saturate(1);
+  color: #fff !important;
   font-weight: 600 !important;
 }
 
@@ -415,12 +418,11 @@ body.has-wallpaper .netease-view .song-trow {
   align-items: center !important;
   gap: 6px !important;
   padding: 5px 12px 5px 8px !important;
-  background: var(--bg-elev-3) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: var(--radius-full) !important;
+  background: rgba(0,0,0,0.1) !important;
   font-size: 12px !important;
   color: var(--text) !important;
   transition: all 0.18s var(--ease-out) !important;
+  backdrop-filter: blur(5px) saturate(1);
 }
 .back-btn:hover {
   background: var(--bg-hover) !important;
@@ -431,7 +433,7 @@ body.has-wallpaper .netease-view .song-trow {
 .songs-header {
   display: flex !important;
   gap: 24px !important;
-  padding: 8px 0 24px !important;
+  padding: 8px 20px 24px !important;
   align-items: flex-end !important;
 }
 .songs-header-cover {
@@ -507,9 +509,11 @@ body.has-wallpaper .netease-view .song-trow {
   display: flex !important;
   gap: 4px !important;
   padding: 3px !important;
-  background: var(--bg-elev-1) !important;
+  background: rgba(30, 30, 30, 0.1) !important;
   border-radius: var(--radius) !important;
   width: fit-content !important;
+  margin: 10px 20px 15px;
+  backdrop-filter: blur(5px) saturate(1);
 }
 .detail-tab,
 .record-tab {
@@ -523,13 +527,12 @@ body.has-wallpaper .netease-view .song-trow {
 .detail-tab:hover,
 .record-tab:hover {
   color: var(--text) !important;
-  background: var(--bg-hover) !important;
+  background: rgba(255, 255, 255, 0.2) !important;
 }
 .detail-tab.active,
 .record-tab.active {
-  background: var(--color-tab-active) !important;
-  color: var(--color-tab-active-text) !important;
-  font-weight: 600 !important;
+  background: rgba(255, 255, 255, 0.3) !important;
+  color: #fff !important;
 }
 
 /* Songs table (within NeteaseView) */
@@ -538,8 +541,9 @@ body.has-wallpaper .netease-view .song-trow {
   border-collapse: collapse !important;
 }
 .ne-songs .song-thead {
-  background: var(--color-table-header) !important;
   border-bottom: 1px solid var(--border) !important;
+  backdrop-filter: blur(1px) saturate(1);
+  background: rgba(30, 30, 30, 0.55)
 }
 .ne-songs .song-thead > * {
   font-size: 11px !important;
@@ -805,11 +809,12 @@ body.has-wallpaper .netease-view .song-trow {
   gap: 10px !important;
   padding: 10px !important;
   border-radius: var(--radius) !important;
-  background: var(--bg-elev-1) !important;
+  background: rgba(0,0,0,0.1) !important;
+  backdrop-filter: blur(3px) saturate(1);
   transition: background 0.12s !important;
 }
 .sub-item:hover {
-  background: var(--bg-elev-2) !important;
+  background: rgba(0,0,0,0.3) !important;
 }
 .sub-avatar {
   width: 42px !important;
@@ -916,10 +921,9 @@ body.has-wallpaper .netease-view .song-trow {
 
 /* User dropdown */
 .ne-dropdown {
-  background: var(--bg-elev-3) !important;
+   background: rgba(30, 30, 30, 0.55) !important;
   border: 1px solid var(--border-strong) !important;
   border-radius: var(--radius) !important;
-  box-shadow: var(--shadow-lg) !important;
 }
 .ne-logout-btn {
   background: transparent !important;
@@ -943,13 +947,3 @@ body.has-wallpaper .netease-view .song-trow {
   font-weight: 600 !important;
 }
 
-/* Toast container — bottom-right pill toasts */
-.toast-container .toast {
-  background: var(--bg-elev-3) !important;
-  border: 1px solid var(--border-strong) !important;
-  border-radius: var(--radius) !important;
-  box-shadow: var(--shadow-lg) !important;
-  padding: 12px 16px !important;
-  font-size: 13px !important;
-  color: var(--text) !important;
-}

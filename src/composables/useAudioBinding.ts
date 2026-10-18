@@ -16,6 +16,8 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   let songLoading = false;
   let recentScrobbleTimer: ReturnType<typeof setTimeout> | null = null;
   let scrobbleDone = false; // onEnded 上报后设为 true，避免 watch(currentSong) 重复上报
+  /** 每首歌只尝试一次播放错误自恢复（重取 URL 续播），避免死循环 */
+  let errorRetrySongId: string | null = null;
 
   // ===== 听歌打卡（最近播放 + 听歌排行）+ 听歌时长上报 =====
   // 职责分离（两套独立的网易云后端系统，分别由不同函数在不同时机触发）：
@@ -190,6 +192,9 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
         }
       }
 
+      // 切歌后允许新歌曲进行错误自恢复
+      if (song && (!oldSong || oldSong.id !== song.id)) errorRetrySongId = null;
+
       // 初始化新歌曲的打卡信息
       if (song && song.source === "netease" && song.neteaseId) {
         if (!oldSong || oldSong.neteaseId !== song.neteaseId) {
@@ -290,7 +295,11 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
         await rodioStop(); stopPolling();
         const audio = ensureAudio();
         if (!audio) { songLoading = false; return; }
-        audio.src = url; audio.load();
+        // 防御性升级 http→https 并去尾斜杠：跳过 CDN 302 重定向（重定向无 Cache-Control 每次都要走网络往返）
+        let audioUrl = url;
+        if (audioUrl.startsWith("http://")) audioUrl = "https://" + audioUrl.slice("http://".length);
+        if (audioUrl.endsWith("/")) audioUrl = audioUrl.slice(0, -1);
+        audio.src = audioUrl; audio.load();
         // 恢复进度（重启场景）：等待 loadedmetadata 后再 seek
         if ((song as any)?._restoreTime && (song as any)._restoreTime > 0) {
           const restoreT = (song as any)._restoreTime;
@@ -326,11 +335,14 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
   watch(
     () => store.isPlaying,
     async (playing) => {
-      if (songLoading) return;
       if (usingRodio.value) {
+        // rodio 装载期间跳过，避免与 rodioPlay 冲突（url watch 完成后会按 isPlaying 处理）
+        if (songLoading) return;
         if (playing) { await rodioResume(); startPolling(); }
         else { await rodioPause(); stopPolling(); }
       } else {
+        // <audio> 分支不受 songLoading 限制：装载期间调用 play/pause 是安全的，
+        // 否则用户在装载窗口内点击播放会被吞掉（表现为"点了没反应"）
         const audio = ensureAudio();
         if (!audio) return;
         if (playing) audio.play().catch(() => {});
@@ -396,11 +408,28 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     // 如果播放进度超过 90%，当作播放完毕处理（URL 过期等情况）
     if (scrobbleInfo && a && a.duration > 0 && a.currentTime / a.duration > 0.9) {
       log.info(TAG, "audio error 但播放进度>90%，当作播放完毕处理", { currentTime: a.currentTime, duration: a.duration });
-      if (scrobbleInfo) {
-        doScrobble(scrobbleInfo, true);
-        scrobbleDone = true;
-      }
+      doScrobble(scrobbleInfo, true);
+      scrobbleDone = true;
       store.next();
+      return;
+    }
+    // 进度 <90% 出错（长时间暂停后 URL 过期/网络抖动）：重新获取 URL 从当前位置续播
+    const song = store.currentSong;
+    if (song && song.source === "netease" && song.neteaseId && errorRetrySongId !== song.id) {
+      errorRetrySongId = song.id;
+      const resumeAt = store.currentTime > 1 ? store.currentTime : 0;
+      const wasPlaying = store.isPlaying;
+      log.info(TAG, "audio error → 重新获取 URL 续播", { name: song.name, resumeAt, wasPlaying });
+      (song as any)._restoreTime = resumeAt;
+      (song as any)._restorePlaying = wasPlaying;
+      song.url = "";
+      const idx = store.queue.findIndex(s => s.id === song.id);
+      if (idx >= 0) {
+        store.queue[idx].url = "";
+        (store.queue[idx] as any)._restoreTime = resumeAt;
+        (store.queue[idx] as any)._restorePlaying = wasPlaying;
+      }
+      void store._ensureNeteaseUrl(song);
     }
   };
   const onEnded = () => {
@@ -411,14 +440,42 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       doScrobble(scrobbleInfo, true); // true = 自动切歌（播放完）
       scrobbleDone = true; // 标记已上报，避免 watch(currentSong) 重复上报
     }
+    // 单曲循环：重新播放当前歌曲（不切歌）
+    if (store.repeat === "one" && store.currentSong) {
+      const a = ensureAudio();
+      if (a) {
+        try { a.currentTime = 0; } catch { /* ignore */ }
+        a.play().catch(() => {});
+      }
+      store.setTime(0);
+      store.setPlaying(true);
+      initScrobble(store.currentSong); // 重新计时这一遍播放
+      scrobbleDone = false;
+      startScrobbleTick();
+      return;
+    }
     store.next();
   };
 
   /** Rodio 播放完毕处理（polling 检测到 !playing 时调用） */
-  function onRodioEnded() {
+  async function onRodioEnded() {
     if (scrobbleInfo) {
       doScrobble(scrobbleInfo, true); // true = 自动切歌（播放完）
       scrobbleDone = true;
+    }
+    // 单曲循环：重新播放当前本地歌曲
+    const song = store.currentSong;
+    if (store.repeat === "one" && song?.url) {
+      try {
+        await rodioPlay(song.url);
+        store.setTime(0);
+        store.setPlaying(true);
+        startPolling();
+        initScrobble(song);
+        scrobbleDone = false;
+        startScrobbleTick();
+        return;
+      } catch { /* 失败则按普通切歌处理 */ }
     }
     store.next();
   }
@@ -430,7 +487,7 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
       if (!playing) { stopPolling(); onRodioEnded(); return; }
       const pos = await import("@tauri-apps/api/core").then(m => m.invoke<number>("rodio_position")).catch(() => 0);
       store.setTime(pos); store.updateActiveLyric();
-    }, 300);
+    }, 100); // 100ms 轮询（原 300ms 太慢，快歌歌词会跳行）
   }
   function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
@@ -459,11 +516,50 @@ export function useAudioBinding(audioRef: Ref<HTMLAudioElement | null>) {
     if (el) { attach(el); current = el; el.volume = store.volume; el.muted = store.muted; }
   }, { immediate: true });
 
+  // ===== 预加载下一首音频数据（用隐藏 audio 元素提前触发 HTTP 缓存）=====
+  // 用同一个隐藏 audio 元素循环复用，避免每次切歌创建新元素
+  let preloadAudio: HTMLAudioElement | null = null;
+  /** 预加载音频 URL：在后台提前把音频字节下载到浏览器 HTTP 缓存，
+   *  切歌时主 audio 元素加载同一 URL 命中缓存秒切。
+   *  注意：仅在网络串流场景（useAudioBinding 的 audio 元素）下有意义；
+   *  Rodio 场景由 Rust 处理，预加载无意义。 */
+  function preloadAudioData(url: string) {
+    if (!url) return;
+    // 防御性升级 http→https 并去尾斜杠：与主 audio 元素一致，避免 preload 走 302 重定向，
+    // 重定向响应无 Cache-Control 不缓存，下次主 audio 元素加载同一 http URL 会重新跳转。
+    let httpsUrl = url;
+    if (httpsUrl.startsWith("http://")) httpsUrl = "https://" + httpsUrl.slice("http://".length);
+    if (httpsUrl.endsWith("/")) httpsUrl = httpsUrl.slice(0, -1);
+    try {
+      if (!preloadAudio) {
+        preloadAudio = document.createElement("audio");
+        preloadAudio.preload = "auto";
+        preloadAudio.style.display = "none";
+        // 不绑定任何事件监听，仅用作触发 HTTP 缓存的"占位播放器"
+        document.body.appendChild(preloadAudio);
+      }
+      // 同一 URL 已在加载则跳过
+      if (preloadAudio.src === httpsUrl) return;
+      preloadAudio.src = httpsUrl;
+      preloadAudio.load();
+      log.info(TAG, "preload audio data", { url: httpsUrl.slice(0, 80) });
+    } catch (e) {
+      log.warn(TAG, "preload audio data failed", { error: String(e) });
+    }
+  }
+
   onUnmounted(() => {
     if (current) detach(current);
     stopPolling();
     stopScrobbleTick();
     clearRecentScrobbleTimer();
     rodioStop();
+    if (preloadAudio) {
+      try { preloadAudio.pause(); preloadAudio.removeAttribute("src"); preloadAudio.load(); } catch { /* ignore */ }
+      try { document.body.removeChild(preloadAudio); } catch { /* ignore */ }
+      preloadAudio = null;
+    }
   });
+
+  return { preloadAudioData };
 }

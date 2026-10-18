@@ -1,16 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import {
-  recommendResource, recommendSongs, playlistDetail, neteaseSongToSong, getCookie,
+  recommendResource, recommendSongs, playlistDetail, playlistTrackAll, neteaseSongToSong, getCookie,
   getCachedLikeList, addLikeCache, removeLikeCache, songLike, getCachedUser,
-  playlistTracks, getCachedPlaylists, type NeteasePlaylist,
+  playlistTracks, getCachedPlaylists, personalizedPlaylists, songDetail, _cachedUser,
+  personalizedNewSong, homepageBlockPage,
+  type NeteasePlaylist,
 } from "@/api/netease";
+import { apiGet } from "@/api/netease/core";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
 import { storeGetSync, storeSetSync } from "@/composables/useStore";
+import { formatCount } from "@/utils/format";
 const toast = useToast();
 import Icon from "@/components/Icon.vue";
+import SongBadge from "@/components/SongBadge.vue";
 import type { Song } from "@/types";
 
 const store = usePlayerStore();
@@ -18,25 +23,74 @@ const store = usePlayerStore();
 const recommendPlaylists = ref<NeteasePlaylist[]>([]);
 const loading = ref(true);
 
+// 新歌速递
+const newSongs = ref<Song[]>([]);
+const newSongsLoading = ref(false);
+
+// 热搜列表
+interface HotSearchItem { searchWord: string; score: number; content?: string; iconType?: number; iconUrl?: string; url?: string; alg?: string }
+const hotSearchList = ref<HotSearchItem[]>([]);
+const hotSearchLoading = ref(false);
+
+/** 区块懒加载：滚动到距视口 400px 内时触发一次加载回调（IntersectionObserver）。
+ *  环境不支持时直接同步触发。KeepAlive 缓存下 observer 只在首次挂载时建立。 */
+function useLazySection(load: () => void) {
+  const el = ref<HTMLElement | null>(null);
+  let ob: IntersectionObserver | null = null;
+  onMounted(() => {
+    if (typeof IntersectionObserver === "undefined") { load(); return; }
+    ob = new IntersectionObserver((entries) => {
+      if (entries.some(e => e.isIntersecting)) {
+        ob?.disconnect();
+        ob = null;
+        load();
+      }
+    }, { rootMargin: "400px 0px" });
+    if (el.value) ob.observe(el.value);
+    else load();
+  });
+  onUnmounted(() => { ob?.disconnect(); ob = null; });
+  return el;
+}
+
+// 推荐新音乐（/personalized/newsong）
+const newMusicSongs = ref<Song[]>([]);
+const newMusicLoading = ref(false);
+
+const recommendPlaylistsRowRef = ref<HTMLElement | null>(null);
+const newMusicRowRef = ref<HTMLElement | null>(null);
+
+/** 鼠标滚轮上下滚动时，横向平滑滑动横排列表（与个人主页“我的歌单”一致） */
+function wheelToHorizontal(e: WheelEvent, el: HTMLElement | null) {
+  if (!el) return;
+  if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+    e.preventDefault();
+    // 速度倍数：滚轮 delta × 1.8，滚动更顺滑
+    const delta = e.deltaY * 1.8;
+    el.scrollTo({ left: el.scrollLeft + delta, behavior: "smooth" });
+  }
+}
+function onRecommendPlaylistsWheel(e: WheelEvent) { wheelToHorizontal(e, recommendPlaylistsRowRef.value); }
+function onNewMusicWheel(e: WheelEvent) { wheelToHorizontal(e, newMusicRowRef.value); }
+
 // 顶部入口卡片
 // 每日推荐 = /recommend/songs（每日推荐歌曲，播放+不感兴趣）
 const dailyRecommendSongs = ref<Song[]>([]);
-// 私人漫游 = /recommend/resource（推荐资源/歌曲）
-const personalRoamSongs = ref<Song[]>([]);
+// 私人漫游 = /personal_fm 流式推荐（点击即开始漫游，无需预加载）
+const roamStarting = ref(false);
 // 私人雷达 = 固定歌单 ID 3136952023
 const personalRadarCover = ref("");
 const personalRadarName = ref("");
 const personalRadarFirstSong = ref("");
 
+/** 是否已登录（漫游/每日推荐需要登录） */
+const isLoggedIn = computed(() => !!_cachedUser.value || !!getCookie());
+
 const dailyFirstSong = computed(() => dailyRecommendSongs.value[0] || null);
 const dailyCoverUrl = computed(() => dailyFirstSong.value?.pic || "");
-const dailySubText = computed(() => {
-  const name = dailyFirstSong.value?.name;
-  return name ? `每日推荐 | 从[${name}]听起` : `${dailyRecommendSongs.value.length} 首推荐歌曲`;
-});
 const radarSubText = computed(() => {
   const name = personalRadarFirstSong.value;
-  return name ? `私人雷达 | 从[${name}]听起` : (personalRadarName.value || '为你打造的歌单');
+  return name ? `从[${name}]听起` : (personalRadarName.value || '为你打造的歌单');
 });
 
 // 榜单精选 - 支持用户自定义（持久化到 tauri-plugin-store）
@@ -214,7 +268,252 @@ async function loadRankingData(r: RankingItem) {
   }
 }
 
-async function loadData() {
+/** 加载推荐新音乐（/personalized/newsong，懒加载区块） */
+async function loadNewMusic() {
+  if (newMusicSongs.value.length || newMusicLoading.value) return;
+  newMusicLoading.value = true;
+  try {
+    const res = await personalizedNewSong(12);
+    const songs = (res.result || []).map((item: any) => {
+      const s = neteaseSongToSong(item.song || item);
+      if (!s.pic && item.picUrl) s.pic = item.picUrl;
+      return s;
+    });
+    newMusicSongs.value = songs;
+    log.info("recommend-view", "new music loaded", { count: songs.length });
+    enrichSongBadges(songs);
+  } catch (e) {
+    log.warn("recommend-view", "load new music failed", { error: String(e) });
+  } finally {
+    newMusicLoading.value = false;
+  }
+}
+
+/** 加载新歌速递（/top/song?type=0，懒加载区块） */
+async function loadNewSongs() {
+  if (newSongs.value.length || newSongsLoading.value) return;
+  newSongsLoading.value = true;
+  try {
+    const res = await apiGet<{ code: number; data?: any[]; result?: any[] }>('/top/song', { type: 0 });
+    const list = res.data || res.result || [];
+    newSongs.value = list.slice(0, 12).map((s: any) => neteaseSongToSong(s));
+    log.info('recommend-view', 'new songs loaded', { count: newSongs.value.length });
+    enrichSongBadges(newSongs.value);
+  } catch (e) {
+    log.warn('recommend-view', 'load new songs failed', { error: String(e) });
+  } finally {
+    newSongsLoading.value = false;
+  }
+}
+
+/** 用 /song/detail 批量补充歌曲标识信息（fee/mark/音质）
+ *  列表 API 可能返回 mark=0（默认值），需通过 songDetail 重新获取。 */
+async function enrichSongBadges(songs: Song[]) {
+  const needBadge = songs.filter(s => (s.fee === undefined || s.mark === undefined || s.mark === 0) && s.neteaseId);
+  if (needBadge.length === 0) return;
+  try {
+    const batchSize = 500;
+    for (let i = 0; i < needBadge.length; i += batchSize) {
+      const batch = needBadge.slice(i, i + batchSize);
+      const detailRes = await songDetail(batch.map(s => s.neteaseId!));
+      for (const ds of (detailRes.songs || [])) {
+        const song = songs.find(s => s.neteaseId === ds.id);
+        if (song) {
+          if (ds.fee !== undefined) song.fee = ds.fee;
+          if (ds.mark !== undefined) song.mark = ds.mark;
+          if (ds.hr) song.hasHires = true;
+          if (ds.sq) song.hasSq = true;
+          if ((ds as any).privilege?.maxBrLevel) song.maxBrLevel = (ds as any).privilege.maxBrLevel;
+        }
+      }
+    }
+    log.info("recommend-view", "song badges enriched", { count: needBadge.length });
+  } catch (e) {
+    log.warn("recommend-view", "enrich song badges failed", { error: String(e) });
+  }
+}
+
+/** 加载热搜列表（/search/hot/detail） */
+async function loadHotSearch() {
+  hotSearchLoading.value = true;
+  try {
+    const res = await apiGet<{ code: number; data?: HotSearchItem[]; result?: { hots?: HotSearchItem[] } }>('/search/hot/detail');
+    const list = res.data || res.result?.hots || [];
+    hotSearchList.value = list.slice(0, 20);
+    log.info('recommend-view', 'hot search loaded', { count: hotSearchList.value.length });
+  } catch (e) {
+    log.warn('recommend-view', 'load hot search failed', { error: String(e) });
+  } finally {
+    hotSearchLoading.value = false;
+  }
+}
+
+/** 点击热搜项 → 跳转搜索 */
+function searchHotWord(word: string) {
+  store.searchKeyword = word;
+  store.setView('search');
+}
+
+// ===== 雷达歌单卡片（/homepage/block/page 的 MGC 雷达歌单第一个，如“时光雷达”，随账号个性化） =====
+const radarPlaylistCard = ref<{ id: number; cover: string } | null>(null);
+const radarCardLoading = ref(false);
+const entryCardsRowRef = ref<HTMLElement | null>(null);
+
+function onEntryCardsWheel(e: WheelEvent) { wheelToHorizontal(e, entryCardsRowRef.value); }
+
+/** 只取雷达歌单 block 的第一张卡（时光雷达等），作为顶部“雷达歌单”入口 */
+async function loadRadarPlaylistCard() {
+  try {
+    const r = await homepageBlockPage();
+    const mgc = (r.blocks || []).find(b => b?.blockCode === "HOMEPAGE_BLOCK_MGC_PLAYLIST");
+    const res = ((mgc?.creatives || [])[0]?.resources || [])[0];
+    const id = Number(res?.resourceId || 0);
+    const cover = String(res?.uiElement?.image?.imageUrl || "").replace(/^http:/, "https:");
+    radarPlaylistCard.value = id && cover ? { id, cover } : null;
+    log.info("recommend-view", "radar playlist card loaded", { id });
+  } catch (e) {
+    log.warn("recommend-view", "radar playlist card failed", { error: String(e) });
+  }
+}
+
+/** 播放雷达歌单（整表播放，与私人雷达同链路：trackIds → /playlist/track/all 前 100 首） */
+async function playRadarPlaylistCard() {
+  const card = radarPlaylistCard.value;
+  if (!card || radarCardLoading.value) return;
+  radarCardLoading.value = true;
+  try {
+    const res = await playlistDetail(card.id, 0);
+    const trackIds = res.playlist?.trackIds || [];
+    if (!trackIds.length) { toast.error("播放失败", "歌单为空"); return; }
+    const ids = trackIds.slice(0, 100).map(t => t.id);
+    const detail = await playlistTrackAll(card.id, 0, ids.length);
+    const songs = (detail.songs || []).map(neteaseSongToSong);
+    if (songs.length) {
+      store.setSourcePlaylistId(card.id);
+      store.playList(songs, 0);
+      toast.success("雷达歌单", `开始播放 ${songs.length} 首歌曲`);
+    }
+  } catch (e) {
+    log.warn("recommend-view", "play radar playlist card failed", { error: String(e) });
+    toast.error("播放失败", "请稍后重试");
+  } finally {
+    radarCardLoading.value = false;
+  }
+}
+
+// ===== 心动模式 / 相似歌曲（官方 /playmode/intelligence/list 优先，服务端异常时本地构建队列） =====
+const heartbeatStarting = ref(false);
+const simiStarting = ref(false);
+
+/** “我喜欢的音乐”歌单 id（pid），兜底用 userId */
+async function getLikePlaylistPid(userId: number | undefined): Promise<number> {
+  try {
+    const pls = await getCachedPlaylists();
+    const mine = pls.find(pl => pl.creator?.userId != null && pl.creator.userId === userId) || pls[0];
+    if (mine) return mine.id;
+  } catch { /* 兜底 pid = userId */ }
+  return userId ?? 0;
+}
+
+/**
+ * 智能推荐队列：优先官方智能播放接口（服务端修复后自动恢复最优体验）。
+ * api-enhanced 的 /playmode/intelligence/list 当前返回 HTTP 500（实测各参数组合均如此），
+ * 此时降级为本地构建：最近红心前 15 首 + 每日推荐前 20 首，去重后 seed 置顶、其余洗牌。
+ */
+async function buildSmartQueue(seedSongId: number, pid: number): Promise<Song[]> {
+  try {
+    const res = await apiGet<{ code: number; data?: any[] }>("/playmode/intelligence/list", { songId: seedSongId, pid });
+    const songs = (res.data || [])
+      .map((d: any) => (d.songInfo ? neteaseSongToSong(d.songInfo) : null))
+      .filter((s: Song | null): s is Song => !!s);
+    if (songs.length >= 5) return songs;
+    log.warn("recommend-view", "intelligence list returned too few songs, fallback", { count: songs.length });
+  } catch (e) {
+    log.warn("recommend-view", "intelligence list failed, fallback to local queue", { error: String(e) });
+  }
+  const parts: Song[] = [];
+  // 最近红心前 15 首（喜欢列表最新在前，第一首即 seed）
+  try {
+    const likeSet = await getCachedLikeList();
+    const ids = [...likeSet].slice(0, 15);
+    if (ids.length) {
+      const detail = await songDetail(ids);
+      parts.push(...(detail.songs || []).map(neteaseSongToSong));
+    }
+  } catch (e) { log.warn("recommend-view", "like songs for smart queue failed", { error: String(e) }); }
+  // 每日推荐前 20 首补充（同口味个性化相似推荐）
+  try {
+    const rec = await recommendSongs();
+    parts.push(...(rec.data?.dailySongs || []).slice(0, 20).map(neteaseSongToSong));
+  } catch (e) { log.warn("recommend-view", "daily songs for smart queue failed", { error: String(e) }); }
+  // seed 置顶 + neteaseId 去重 + 其余洗牌
+  const seen = new Set<number>();
+  const head: Song[] = [], tail: Song[] = [];
+  for (const sg of parts) {
+    const nid = sg.neteaseId;
+    if (nid == null || seen.has(nid)) continue;
+    seen.add(nid);
+    (head.length === 0 ? head : tail).push(sg);
+  }
+  for (let i = tail.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [tail[i], tail[j]] = [tail[j], tail[i]];
+  }
+  return [...head, ...tail];
+}
+
+async function playHeartbeatMode() {
+  if (!isLoggedIn.value) { toast.error("请先登录", "心动模式需要登录网易云账号"); return; }
+  if (heartbeatStarting.value) return;
+  heartbeatStarting.value = true;
+  try {
+    const user = _cachedUser.value ?? await getCachedUser();
+    const pid = await getLikePlaylistPid(user?.userId);
+    const likeSet = await getCachedLikeList();
+    const seedSongId = likeSet.values().next().value as number | undefined;
+    if (!seedSongId) { toast.info("暂无喜欢的歌曲", "先喜欢几首歌，再开启心动模式"); return; }
+    const songs = await buildSmartQueue(seedSongId, pid);
+    if (!songs.length) { toast.error("心动模式开启失败", "未获取到推荐歌曲，请稍后重试"); return; }
+    store.setSourcePlaylistId(null);
+    store.playList(songs, 0);
+    log.info("recommend-view", "heartbeat mode started", { count: songs.length, seedSongId, pid });
+    toast.success("心动模式", `红心歌曲和相似推荐（${songs.length} 首）`);
+  } catch (e) {
+    log.warn("recommend-view", "heartbeat mode failed", { error: String(e) });
+    toast.error("心动模式开启失败", "请稍后重试");
+  } finally {
+    heartbeatStarting.value = false;
+  }
+}
+
+/** 相似歌曲：从最近喜欢的歌开始智能推荐（与心动模式共用智能队列） */
+async function playSimilarSongs() {
+  if (!isLoggedIn.value) { toast.error("请先登录", "相似歌曲需要登录网易云账号"); return; }
+  if (simiStarting.value) return;
+  simiStarting.value = true;
+  try {
+    const user = _cachedUser.value ?? await getCachedUser();
+    const pid = await getLikePlaylistPid(user?.userId);
+    const likeSet = await getCachedLikeList();
+    const seedSongId = likeSet.values().next().value as number | undefined;
+    if (!seedSongId) { toast.info("暂无喜欢的歌曲", "先喜欢几首歌，再听相似歌曲"); return; }
+    const songs = await buildSmartQueue(seedSongId, pid);
+    if (!songs.length) { toast.error("相似歌曲播放失败", "未获取到推荐歌曲，请稍后重试"); return; }
+    store.setSourcePlaylistId(null);
+    store.playList(songs, 0);
+    log.info("recommend-view", "similar songs started", { count: songs.length, seedSongId, pid });
+    toast.success("相似歌曲", `从你喜欢的歌听起（${songs.length} 首）`);
+  } catch (e) {
+    log.warn("recommend-view", "similar songs failed", { error: String(e) });
+    toast.error("相似歌曲播放失败", "请稍后重试");
+  } finally {
+    simiStarting.value = false;
+  }
+}
+
+/** 加载登录相关的个性化数据（每日推荐歌曲 + 推荐歌单）。
+ *  登录状态变化时可单独重载，不必重复请求榜单/雷达。 */
+async function loadPersonalizedData() {
   loading.value = true;
   if (getCookie()) {
     // 每日推荐歌曲（/recommend/songs）
@@ -223,37 +522,25 @@ async function loadData() {
       const dailySongs = sres.data?.dailySongs || [];
       dailyRecommendSongs.value = dailySongs.slice(0, 30).map(neteaseSongToSong);
       log.info("recommend-view", "daily songs loaded", { count: dailyRecommendSongs.value.length });
+      enrichSongBadges(dailyRecommendSongs.value);
     } catch (e) { log.warn("recommend-view", "load daily songs failed", { error: String(e) }); }
 
-    // 推荐资源（/recommend/resource）—— 返回推荐歌单列表
-    // 私人漫游：从第一个推荐歌单获取歌曲
+    // 推荐歌单（/recommend/resource，每日更新的个性化推荐歌单）
     try {
       const res = await recommendResource();
-      const recPlaylists = res.recommend || res.data || [];
-      log.info("recommend-view", "recommend resource loaded", { count: recPlaylists.length, firstPl: recPlaylists[0]?.name });
-      if (recPlaylists.length > 0 && recPlaylists[0].id) {
-        const firstPl = recPlaylists[0];
-        const { playlistTrackAll } = await import("@/api/netease");
-        const detail = await playlistTrackAll(firstPl.id, 0, 30);
-        personalRoamSongs.value = (detail.songs || []).map(neteaseSongToSong);
-        log.info("recommend-view", "personal roam songs loaded from first playlist", { plName: firstPl.name, count: personalRoamSongs.value.length });
-      }
+      recommendPlaylists.value = res.recommend || res.data || [];
+      log.info("recommend-view", "recommend playlists loaded", { count: recommendPlaylists.value.length });
     } catch (e) { log.warn("recommend-view", "load recommend resource failed", { error: String(e) }); }
   }
 
-  // 私人雷达封面（固定歌单 ID 3136952023）
-  playlistDetail(3136952023, 1).then(res => {
-    personalRadarCover.value = res.playlist?.coverImgUrl || "";
-    personalRadarName.value = res.playlist?.name || "";
-    const firstTrack = res.playlist?.tracks?.[0];
-    personalRadarFirstSong.value = firstTrack?.name || "";
-  }).catch(e => { log.warn("recommend-view", "personal radar failed", { error: String(e) }); });
-
-  loading.value = false;
-  // 并行加载榜单（使用新的 loadRankingData 函数）
-  for (const r of rankings.value) {
-    loadRankingData(r);
+  // 未登录或个性化推荐为空：回退到 /personalized（无需登录的推荐歌单）
+  if (recommendPlaylists.value.length === 0) {
+    try {
+      recommendPlaylists.value = await personalizedPlaylists(12);
+      log.info("recommend-view", "personalized playlists loaded (fallback)", { count: recommendPlaylists.value.length });
+    } catch (e) { log.warn("recommend-view", "load personalized failed", { error: String(e) }); }
   }
+  loading.value = false;
 }
 
 /** 播放每日推荐歌曲 */
@@ -265,24 +552,18 @@ function playDailyRecommend() {
   }
 }
 
-/** 播放私人漫游歌曲（单首播放，不感兴趣换歌） */
-function playPersonalRoam() {
-  if (personalRoamSongs.value.length > 0) {
-    store.setSourcePlaylistId(null);
-    store.isPersonalRoam = true;
-    // 私人漫游只播放第一首
-    store.queue = [personalRoamSongs.value[0]];
-    store.currentIndex = 0;
-    store.isPlaying = true;
-    // 加载歌词和URL
-    const s = store.currentSong;
-    if (s && s.source === "netease" && s.neteaseId) {
-      store._ensureNeteaseUrl(s);
-      store._ensureNeteaseLyrics(s).then(() => {
-        if (store.currentSong?.id === s.id) store.loadLyrics(s);
-      });
-    }
-    toast.success("私人漫游", "开始播放推荐歌曲");
+/** 开始私人漫游（/personal_fm 流式推荐，同网易云 PC 端漫游）
+ *  点击后拉取第一批推荐并播放，之后快到队尾会自动补充新歌。 */
+async function playPersonalRoam() {
+  if (!isLoggedIn.value) { toast.error("请先登录", "私人漫游需要登录网易云账号"); return; }
+  if (roamStarting.value) return;
+  roamStarting.value = true;
+  try {
+    const ok = await store.startPersonalRoam();
+    if (ok) toast.success("私人漫游", "已开启，根据你的口味无限推荐");
+    else toast.error("漫游开启失败", "获取推荐失败，请稍后重试");
+  } finally {
+    roamStarting.value = false;
   }
 }
 
@@ -321,11 +602,9 @@ function openDailyRecommend() {
   store.setView("netease");
 }
 
-/** 打开私人漫游详情页（不直接播放） */
+/** 私人漫游没有"歌单详情页"（流式推荐），点击卡片即开始漫游 */
 function openPersonalRoam() {
-  if (!personalRoamSongs.value.length) return;
-  store.pendingPlaylistId = -3;
-  store.setView("netease");
+  playPersonalRoam();
 }
 
 /** 播放私人雷达歌单（点击封面播放按钮时调用） */
@@ -415,6 +694,20 @@ function onContextMenu(e: MouseEvent, song: Song) {
   e.stopPropagation();
   contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, song };
   showPlayNextSub.value = false;
+  // 自适应弹出位置：rAF 后测量实际菜单尺寸并调整，确保不溢出屏幕
+  requestAnimationFrame(() => {
+    const els = document.querySelectorAll(".ctx-menu");
+    const el = els[els.length - 1] as HTMLElement | null;
+    if (!el) return;
+    const mw = el.offsetWidth, mh = el.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = e.clientX, y = e.clientY;
+    if (x + mw > vw - 8) x = vw - mw - 8;
+    if (y + mh > vh - 8) y = vh - mh - 8;
+    if (x < 8) x = 8;
+    if (y < 8) y = 8;
+    contextMenu.value = { visible: true, x, y, song };
+  });
   if (song.source === "netease" && song.neteaseId) {
     getCachedLikeList().then(set => { ctxSongLiked.value = set.has(song.neteaseId!); }).catch(() => {});
   } else { ctxSongLiked.value = false; }
@@ -463,6 +756,37 @@ function onDocClick() { closeContextMenu(); }
 // 程序启动时加载一次，之后切换页面不再刷新（退出程序重新进入才刷新）
 let hasLoaded = false;
 
+// ===== 懒加载区块（IntersectionObserver，滚动到附近才发请求，降低启动时并发与内存占用） =====
+// 首屏立即加载：入口卡片 + 顶部个性化推荐歌单卡片 + 个性推荐歌单 + 每日推荐数据（loadData）
+// 懒加载：推荐新音乐 / 新歌速递 / 热搜榜 / 榜单精选（6 个 playlistDetail 重请求）
+const newMusicSection = useLazySection(() => { void loadNewMusic(); });
+const newSongsSection = useLazySection(() => { void loadNewSongs(); });
+const hotSearchSection = useLazySection(() => { void loadHotSearch(); });
+const rankingsSection = useLazySection(() => {
+  for (const r of rankings.value) loadRankingData(r);
+});
+
+async function loadData() {
+  const personalizedP = loadPersonalizedData();
+
+  // 私人雷达封面（固定歌单 ID 3136952023，首屏入口卡片需要）
+  playlistDetail(3136952023, 1).then(res => {
+    personalRadarCover.value = res.playlist?.coverImgUrl || "";
+    personalRadarName.value = res.playlist?.name || "";
+  }).catch(e => { log.warn("recommend-view", "personal radar failed", { error: String(e) }); });
+  // 第一首歌名：/playlist/detail 的 tracks 顺序不可靠（动态歌单下尤其明显），
+  // 改用 /playlist/track/all 精确取第一首，与歌单页展示顺序一致
+  playlistTrackAll(3136952023, 1, 0).then(detail => {
+    personalRadarFirstSong.value = detail.songs?.[0]?.name || "";
+  }).catch(e => { log.warn("recommend-view", "radar first song failed", { error: String(e) }); });
+
+  // 雷达歌单卡片（/homepage/block/page 雷达歌单第一个，fire-and-forget）
+  loadRadarPlaylistCard();
+
+  // 其余区块（推荐新音乐/新歌速递/热搜榜/榜单精选）由懒加载触发，不再在此并发请求
+  await personalizedP;
+}
+
 onMounted(() => {
   document.addEventListener("click", onDocClick);
   if (!hasLoaded) {
@@ -470,49 +794,179 @@ onMounted(() => {
     hasLoaded = true;
   }
 });
-onUnmounted(() => { document.removeEventListener("click", onDocClick); });
+onUnmounted(() => {
+  document.removeEventListener("click", onDocClick);
+});
+
+// 登录状态变化时重新加载个性化内容（登录前进入首页会缓存"未登录"的空数据）
+watch(() => _cachedUser.value?.userId, (uid, oldUid) => {
+  if (uid !== oldUid && hasLoaded) {
+    log.info("recommend-view", "login state changed, reloading personalized data", { uid });
+    dailyRecommendSongs.value = [];
+    recommendPlaylists.value = [];
+    radarPlaylistCard.value = null;
+    loadRadarPlaylistCard();
+    loadPersonalizedData();
+  }
+});
 </script>
 
 <template>
   <section class="recommend-view nice-scroll">
-    <!-- 顶部入口卡片：每日推荐 / 私人漫游 / 私人雷达 -->
-    <div class="entry-cards">
-      <!-- 每日推荐 = /recommend/songs 每日推荐歌曲 -->
-      <div class="entry-card" :class="{ disabled: !dailyRecommendSongs.length }">
-        <div class="entry-cover daily-cover" @click="openDailyRecommend">
-          <img v-if="dailyCoverUrl" :src="dailyCoverUrl" alt="每日推荐" referrerpolicy="no-referrer" loading="lazy" />
-          <div v-else class="entry-date">{{ new Date().getDate() }}</div>
-          <button class="entry-play-btn" title="播放每日推荐" @click.stop="playDailyRecommend" :disabled="!dailyRecommendSongs.length">
-            <Icon name="play" :size="20" />
-          </button>
+    <!-- 顶部入口卡片（仿手机端样式）：每日推荐 / 私人漫游 / 私人雷达 / 心动模式 / 雷达歌单 / 相似歌曲 -->
+    <div class="top-area">
+      <div ref="entryCardsRowRef" class="entry-cards" @wheel="onEntryCardsWheel">
+        <!-- 每日推荐 = /recommend/songs 每日推荐歌曲 -->
+        <div class="entry-card" :class="{ disabled: !dailyRecommendSongs.length }">
+          <div class="entry-cover daily-cover" @click="openDailyRecommend">
+            <img v-if="dailyCoverUrl" :src="dailyCoverUrl" alt="每日推荐" referrerpolicy="no-referrer" loading="lazy" />
+            <div v-else class="entry-date">{{ new Date().getDate() }}</div>
+            <div class="entry-shade" />
+            <div class="entry-overlay">
+              <div class="entry-name">每日推荐</div>
+              <div class="entry-sub">今日限定好歌推荐</div>
+            </div>
+            <button class="entry-play-btn" title="播放每日推荐" @click.stop="playDailyRecommend" :disabled="!dailyRecommendSongs.length">
+              <Icon name="play" :size="20" />
+            </button>
+          </div>
         </div>
-        <div class="entry-name" @click="openDailyRecommend">每日推荐</div>
-        <div class="entry-sub" @click="openDailyRecommend">{{ dailySubText }}</div>
-      </div>
 
-      <!-- 私人漫游 = /recommend/resource 推荐歌曲 -->
-      <div class="entry-card" :class="{ disabled: !personalRoamSongs.length }">
-        <div class="entry-cover roam-cover" @click="openPersonalRoam">
-          <Icon name="shuffle" :size="28" />
-          <button class="entry-play-btn" title="播放私人漫游" @click.stop="playPersonalRoam" :disabled="!personalRoamSongs.length">
-            <Icon name="play" :size="20" />
-          </button>
+        <!-- 私人漫游 = /personal_fm 流式推荐（同网易云 PC 端漫游） -->
+        <div class="entry-card" :class="{ disabled: !isLoggedIn }">
+          <div class="entry-cover roam-cover" @click="openPersonalRoam">
+            <Icon name="shuffle" :size="28" />
+            <div class="entry-shade" />
+            <div class="entry-overlay">
+              <div class="entry-name">私人漫游</div>
+              <div class="entry-sub">{{ store.isPersonalRoam ? '漫游中 · 无限畅听' : '多样频道无限畅听' }}</div>
+            </div>
+            <button class="entry-play-btn" title="开始私人漫游" @click.stop="playPersonalRoam" :disabled="!isLoggedIn || roamStarting">
+              <div v-if="roamStarting" class="spinner-sm roam-spinner" />
+              <Icon v-else name="play" :size="20" />
+            </button>
+          </div>
         </div>
-        <div class="entry-name" @click="openPersonalRoam">私人漫游</div>
-        <div class="entry-sub" @click="openPersonalRoam">{{ personalRoamSongs.length }} 首推荐歌曲</div>
-      </div>
 
-      <!-- 私人雷达 = 固定歌单 ID 3136952023 -->
-      <div class="entry-card">
-        <div class="entry-cover radar-cover" @click="openPersonalRadar">
-          <img v-if="personalRadarCover" :src="personalRadarCover + '?param=200x200'" alt="私人雷达" referrerpolicy="no-referrer" loading="lazy" />
-          <Icon v-else name="radio" :size="28" />
-          <button class="entry-play-btn" title="播放私人雷达" @click.stop="playPersonalRadarPlaylist">
-            <Icon name="play" :size="20" />
-          </button>
+        <!-- 私人雷达 = 固定歌单 ID 3136952023 -->
+        <div class="entry-card">
+          <div class="entry-cover radar-cover" @click="openPersonalRadar">
+            <img v-if="personalRadarCover" :src="personalRadarCover + '?param=340x340'" alt="私人雷达" referrerpolicy="no-referrer" loading="lazy" />
+            <Icon v-else name="radio" :size="28" />
+            <div class="entry-shade" />
+            <div class="entry-overlay">
+              <div class="entry-name">私人雷达</div>
+              <div class="entry-sub">{{ radarSubText }}</div>
+            </div>
+            <button class="entry-play-btn" title="播放私人雷达" @click.stop="playPersonalRadarPlaylist">
+              <Icon name="play" :size="20" />
+            </button>
+          </div>
         </div>
-        <div class="entry-name" @click="openPersonalRadar">私人雷达</div>
-        <div class="entry-sub" @click="openPersonalRadar">{{ radarSubText }}</div>
+
+        <!-- 心动模式 = 红心歌曲智能推荐（官方接口异常时本地构建队列） -->
+        <div class="entry-card" :class="{ disabled: !isLoggedIn }">
+          <div class="entry-cover heartbeat-cover" @click="playHeartbeatMode">
+            <Icon name="heartFilled" :size="28" />
+            <div class="entry-shade" />
+            <div class="entry-overlay">
+              <div class="entry-name">心动模式</div>
+              <div class="entry-sub">红心歌曲和相似推荐</div>
+            </div>
+            <button class="entry-play-btn" title="开启心动模式" @click.stop="playHeartbeatMode" :disabled="!isLoggedIn || heartbeatStarting">
+              <div v-if="heartbeatStarting" class="spinner-sm roam-spinner" />
+              <Icon v-else name="play" :size="20" />
+            </button>
+          </div>
+        </div>
+
+        <!-- 雷达歌单 = /homepage/block/page 雷达歌单第一个（时光雷达等，随账号个性化） -->
+        <div v-if="radarPlaylistCard" class="entry-card">
+          <div class="entry-cover radarlist-cover" @click="playRadarPlaylistCard">
+            <img :src="radarPlaylistCard.cover + '?param=340x340'" alt="雷达歌单" referrerpolicy="no-referrer" loading="lazy" decoding="async" />
+            <div class="entry-shade" />
+            <div class="entry-overlay">
+              <div class="entry-name">雷达歌单</div>
+              <div class="entry-sub">反复聆听你爱的歌</div>
+            </div>
+            <button class="entry-play-btn" title="播放雷达歌单" @click.stop="playRadarPlaylistCard" :disabled="radarCardLoading">
+              <div v-if="radarCardLoading" class="spinner-sm roam-spinner" />
+              <Icon v-else name="play" :size="20" />
+            </button>
+          </div>
+        </div>
+
+        <!-- 相似歌曲 = 从最近喜欢的歌开始智能推荐 -->
+        <div class="entry-card" :class="{ disabled: !isLoggedIn }">
+          <div class="entry-cover simi-cover" @click="playSimilarSongs">
+            <Icon name="sparkles" :size="28" />
+            <div class="entry-shade" />
+            <div class="entry-overlay">
+              <div class="entry-name">相似歌曲</div>
+              <div class="entry-sub">从你喜欢的歌听起</div>
+            </div>
+            <button class="entry-play-btn" title="播放相似歌曲" @click.stop="playSimilarSongs" :disabled="!isLoggedIn || simiStarting">
+              <div v-if="simiStarting" class="spinner-sm roam-spinner" />
+              <Icon v-else name="play" :size="20" />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 个性推荐歌单（/recommend/resource + /personalized，从下方上移至顶部） -->
+    <div class="section">
+      <h2 class="section-title">个性推荐歌单</h2>
+      <div v-if="loading" class="loading-state"><div class="spinner" /><span>加载中...</span></div>
+      <div v-else-if="recommendPlaylists.length === 0" class="loading-state">
+        <Icon name="music" :size="20" />
+        <span>{{ isLoggedIn ? '暂无推荐歌单，请稍后重试' : '登录后查看个性化推荐歌单' }}</span>
+      </div>
+      <div v-else ref="recommendPlaylistsRowRef" class="recommend-playlists-row" @wheel="onRecommendPlaylistsWheel">
+        <button
+          v-for="pl in recommendPlaylists"
+          :key="pl.id"
+          class="rp-pl-item"
+          @click="openPlaylist(pl)"
+        >
+          <div class="rp-pl-cover">
+            <img
+              v-if="pl.coverImgUrl"
+              :src="pl.coverImgUrl + '?param=168x168'"
+              :alt="pl.name"
+              referrerpolicy="no-referrer"
+              loading="lazy"
+              decoding="async"
+            />
+            <div v-else class="rp-pl-cover-fallback"><Icon name="music" :size="24" /></div>
+          </div>
+          <div class="rp-pl-name" :title="pl.name">{{ pl.name }}</div>
+          <div v-if="pl.playCount" class="rp-pl-count">{{ formatCount(pl.playCount) }}</div>
+        </button>
+      </div>
+    </div>
+
+    <!-- 推荐新音乐（/personalized/newsong，懒加载区块；滚轮横滑与个性推荐歌单一致） -->
+    <div ref="newMusicSection" class="section">
+      <h2 class="section-title">推荐新音乐</h2>
+      <div v-if="newMusicLoading" class="loading-state"><div class="spinner" /><span>加载中...</span></div>
+      <div v-else-if="newMusicSongs.length === 0" class="loading-state"><Icon name="music" :size="20" /><span>暂无推荐</span></div>
+      <div v-else ref="newMusicRowRef" class="music-row" @wheel="onNewMusicWheel">
+        <button
+          v-for="song in newMusicSongs"
+          :key="song.id"
+          class="music-card"
+          :class="{ active: song.id === store.currentSong?.id }"
+          @click="playSong(song)"
+        >
+          <div class="music-card-cover">
+            <img v-if="song.pic" :src="song.pic + '?param=240x240'" :alt="song.name" referrerpolicy="no-referrer" loading="lazy" decoding="async" />
+            <Icon v-else name="music" :size="24" />
+            <span class="music-card-play"><Icon :name="store.currentSong?.id === song.id && store.isPlaying ? 'pause' : 'play'" :size="16" /></span>
+          </div>
+          <div class="music-card-name truncate" :title="song.name">{{ song.name }}</div>
+          <div class="music-card-artist truncate" :title="song.artist">{{ song.artist }}</div>
+        </button>
       </div>
     </div>
 
@@ -525,13 +979,16 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </button>
       </div>
       <div class="roam-list">
-        <div v-for="(song, idx) in dailyRecommendSongs.slice(0, 10)" :key="song.id"
+        <div v-for="(song, idx) in dailyRecommendSongs.slice(0, 6)" :key="song.id"
           class="roam-item" :class="{ active: song.id === store.currentSong?.id }"
           @click="playSong(song)">
           <span class="roam-idx">{{ idx + 1 }}</span>
           <div class="roam-cover-sm" v-if="song.pic"><img :src="song.pic" alt="" referrerpolicy="no-referrer" /></div>
           <div class="roam-meta">
-            <div class="roam-name truncate">{{ song.name }}</div>
+            <div class="roam-name-line">
+              <div class="roam-name truncate">{{ song.name }}</div>
+              <SongBadge :song="song" size="sm" />
+            </div>
             <div class="roam-artist truncate">{{ song.artist }}</div>
           </div>
           <button class="roam-dislike" title="不感兴趣" @click.stop="dislikeSong(song)">
@@ -541,23 +998,61 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       </div>
     </div>
 
-    <!-- 推荐歌单 -->
-    <div class="section">
-      <h2 class="section-title">推荐歌单</h2>
-      <div v-if="loading" class="loading-state"><div class="spinner" /><span>加载中...</span></div>
-      <div v-else class="playlist-grid">
-        <button v-for="pl in recommendPlaylists" :key="pl.id" class="playlist-card" @click="openPlaylist(pl)">
-          <div class="card-cover">
-            <img v-if="pl.coverImgUrl" :src="pl.coverImgUrl + '?param=200x200'" :alt="pl.name" referrerpolicy="no-referrer" loading="lazy" />
-            <Icon v-else name="music" :size="28" />
+    <!-- 新歌速递（/top/song，懒加载区块） -->
+    <div ref="newSongsSection" class="section">
+      <h2 class="section-title">新歌速递</h2>
+      <div v-if="newSongsLoading" class="loading-state"><div class="spinner" /><span>加载中...</span></div>
+      <div v-else-if="newSongs.length === 0" class="loading-state"><Icon name="music" :size="20" /><span>暂无新歌</span></div>
+      <div v-else class="new-songs-grid">
+        <button
+          v-for="song in newSongs.slice(0, 6)"
+          :key="song.id"
+          class="new-song-item"
+          :class="{ active: song.id === store.currentSong?.id }"
+          @click="playSong(song)"
+        >
+          <div class="new-song-cover">
+            <img v-if="song.pic" :src="song.pic" :alt="song.name" referrerpolicy="no-referrer" loading="lazy" />
+            <Icon v-else name="music" :size="18" />
           </div>
-          <div class="card-name truncate">{{ pl.name }}</div>
+          <div class="new-song-meta">
+            <div class="new-song-name-line">
+              <div class="new-song-name truncate">{{ song.name }}</div>
+              <SongBadge :song="song" size="sm" />
+            </div>
+            <div class="new-song-artist truncate">{{ song.artist }}</div>
+          </div>
+          <div class="new-song-play">
+            <Icon :name="store.currentSong?.id === song.id && store.isPlaying ? 'pause' : 'play'" :size="14" />
+          </div>
         </button>
       </div>
     </div>
 
-    <!-- 榜单精选 -->
-    <div class="section">
+    <!-- 热搜榜（/search/hot/detail，懒加载区块） -->
+    <div ref="hotSearchSection" class="section">
+      <h2 class="section-title">热搜榜</h2>
+      <div v-if="hotSearchLoading" class="loading-state"><div class="spinner" /><span>加载中...</span></div>
+      <div v-else-if="hotSearchList.length === 0" class="loading-state"><Icon name="music" :size="20" /><span>暂无热搜数据</span></div>
+      <div v-else class="hot-search-grid">
+        <button
+          v-for="(item, idx) in hotSearchList.slice(0, 12)"
+          :key="item.searchWord"
+          class="hot-search-item"
+          @click="searchHotWord(item.searchWord)"
+        >
+          <span class="hot-idx" :class="{ 'hot-top': idx < 3 }">{{ idx + 1 }}</span>
+          <span class="hot-word truncate">{{ item.searchWord }}</span>
+          <span v-if="item.iconType === 1" class="hot-badge hot">HOT</span>
+          <span v-if="item.iconType === 2" class="hot-badge new">NEW</span>
+          <span v-if="item.iconType === 3" class="hot-badge recommend">荐</span>
+          <span v-if="item.score" class="hot-score">{{ formatCount(item.score) }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 榜单精选（懒加载区块：滚动到附近才逐个请求榜单数据） -->
+    <div ref="rankingsSection" class="section">
       <div class="ranking-section-header">
         <h2 class="section-title">榜单精选</h2>
         <span class="ranking-count-hint">{{ rankings.length }} / {{ MAX_RANKINGS }}</span>
@@ -712,14 +1207,20 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .section { display: flex; flex-direction: column; gap: 16px; }
 .section-title { margin: 0; font-size: 20px; font-weight: 700; color: var(--text); }
 
-/* 顶部入口卡片 */
-.entry-cards { display: flex; gap: 16px; flex-shrink: 0; }
-.entry-card {
-  display: flex; flex-direction: column; gap: 8px; text-align: left;
-  flex: 0 0 140px; transition: transform 0.2s var(--ease-out);
-  cursor: pointer;
+/* 顶部入口卡片（仿手机端样式）：封面背景 + 左下标题/副标题 + 右下播放键
+   六张卡片：每日推荐 / 私人漫游 / 私人雷达 / 心动模式 / 雷达歌单 / 相似歌曲；
+   窗口变窄时横向滚动（滚轮横滑），滚动条隐藏 */
+.entry-cards {
+  display: flex; gap: 16px;
+  min-width: 0; max-width: 100%;
+  overflow-x: auto; overflow-y: hidden;
+  padding: 3px 2px 6px;
+  scroll-behavior: smooth;
+  scrollbar-width: none; -ms-overflow-style: none;
 }
-.entry-card:hover { transform: translateY(-3px); }
+.entry-cards::-webkit-scrollbar { display: none; }
+.entry-card { flex: 0 0 170px; transition: transform 0.2s var(--ease-out); cursor: pointer; }
+.entry-card:hover { transform: scale(1.02); }
 .entry-card.disabled { opacity: 0.5; cursor: not-allowed; }
 .entry-card.disabled:hover { transform: none; }
 .entry-cover {
@@ -730,28 +1231,48 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   cursor: pointer;
 }
 .entry-cover img { width: 100%; height: 100%; object-fit: cover; }
+.entry-shade {
+  position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0) 42%, rgba(0, 0, 0, 0.62) 100%);
+}
+.entry-overlay {
+  position: absolute; left: 10px; right: 10px; bottom: 9px; z-index: 2;
+  display: flex; flex-direction: column; gap: 2px; min-width: 0;
+  pointer-events: none;
+}
+.entry-name {
+  font-size: 15px; font-weight: 700; color: #fff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.entry-sub {
+  font-size: 11px; color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
 .entry-play-btn {
   position: absolute; bottom: 8px; right: 8px;
   width: 36px; height: 36px; border-radius: 50%;
-  background: rgba(0, 0, 0, 0.6); color: #fff;
+  background: rgba(0, 0, 0, 0.2); color: #fff;
   display: flex; align-items: center; justify-content: center;
   transition: transform 0.2s var(--ease-out), background 0.2s var(--ease-out);
-  backdrop-filter: blur(4px); z-index: 3; cursor: pointer;
+  backdrop-filter: blur(3px) saturate(1); z-index: 3; cursor: pointer;
 }
-.entry-play-btn:hover { transform: scale(1.12); background: rgba(0, 0, 0, 0.8); }
+.entry-play-btn:hover { transform: scale(1.05); background: rgba(0, 0, 0, 0.3); }
 .entry-play-btn:active { transform: scale(0.95); }
 .entry-play-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .entry-play-btn :deep(.icon-svg) { margin-left: 2px; pointer-events: none; }
 .daily-cover { background: linear-gradient(135deg, #ff6b35, #fa233b); color: #fff; }
 .roam-cover { background: linear-gradient(135deg, #6750A4, #9d4edd); color: #fff; }
 .radar-cover { background: linear-gradient(135deg, #06d6a0, #118ab2); color: #fff; }
+.heartbeat-cover { background: linear-gradient(135deg, #ff5f6d, #d72684); color: #fff; }
+.radarlist-cover { background: linear-gradient(135deg, #f973a3, #ec4899); color: #fff; }
+.simi-cover { background: linear-gradient(135deg, #f59e0b, #ef4444); color: #fff; }
 .entry-date {
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
   font-size: 42px; font-weight: 800; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,0.3);
   pointer-events: none;
 }
-.entry-name { font-size: 14px; color: var(--text); font-weight: 600; }
-.entry-sub { font-size: 11px; color: var(--text-tertiary); }
 
 /* 私人漫游歌曲列表 */
 .roam-header { display: flex; align-items: center; justify-content: space-between; }
@@ -766,6 +1287,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .roam-cover-sm { width: 36px; height: 36px; border-radius: 6px; overflow: hidden; flex-shrink: 0; }
 .roam-cover-sm img { width: 100%; height: 100%; object-fit: cover; }
 .roam-meta { flex: 1; min-width: 0; }
+.roam-name-line { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
+.roam-name-line .roam-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .roam-name { font-size: 13px; color: var(--text); }
 .roam-artist { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
 .roam-dislike { width: 28px; height: 28px; border-radius: 6px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.15s, background 0.15s; flex-shrink: 0; }
@@ -775,14 +1298,280 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .loading-state { display: flex; align-items: center; gap: 8px; color: var(--text-tertiary); font-size: 13px; padding: 24px; }
 .spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .spinner-sm { width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 12px auto; }
+.roam-spinner { margin: 0; border-color: rgba(255,255,255,0.35); border-top-color: #fff; }
 
-/* 推荐歌单网格 */
-.playlist-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 16px; }
-.playlist-card { display: flex; flex-direction: column; gap: 8px; text-align: left; transition: transform 0.2s var(--ease-out); }
-.playlist-card:hover { transform: translateY(-3px); }
-.card-cover { aspect-ratio: 1; border-radius: var(--radius); overflow: hidden; background: var(--bg-elev-3); display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); box-shadow: var(--shadow-sm); }
-.card-cover img { width: 100%; height: 100%; object-fit: cover; }
-.card-name { font-size: 13px; color: var(--text); font-weight: 500; line-height: 1.3; }
+/* 推荐新音乐卡片横排（懒加载区块；滚轮横滑/hover 与个性推荐歌单一致） */
+.music-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 2px 6px;
+  scroll-behavior: smooth;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.music-row::-webkit-scrollbar { display: none; }
+.music-card {
+  flex: 0 0 132px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+.music-card-cover {
+  position: relative;
+  width: 132px;
+  aspect-ratio: 1;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-elev-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out);
+}
+.music-card:hover .music-card-cover { transform: scale(1.03); box-shadow: var(--shadow-md); }
+.music-card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.music-card-play {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.18s var(--ease-out), transform 0.18s var(--ease-out);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  z-index: 2;
+}
+.music-card:hover .music-card-play { opacity: 1; transform: translateY(0); }
+.music-card.active .music-card-name { color: var(--accent); }
+.music-card-name { font-size: 12px; font-weight: 600; color: var(--text); line-height: 1.3; padding: 0 2px; }
+.music-card-artist { font-size: 11px; color: var(--text-tertiary); padding: 0 2px; }
+
+/* 推荐歌单 - 横向滚动（与个人主页"我的歌单"风格一致：隐藏滚动条 + 鼠标滚轮横向滑动）
+   尺寸为个人主页的 0.8 倍（210→168px） */
+.recommend-playlists-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 3px 2px 6px;
+  scroll-behavior: smooth;
+  /* 隐藏滚动条 */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.recommend-playlists-row::-webkit-scrollbar { display: none; }
+.rp-pl-item {
+  flex: 0 0 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.18s var(--ease-out);
+}
+.rp-pl-item:hover .rp-pl-cover { transform: scale(1.03); box-shadow: var(--shadow-md); }
+.rp-pl-cover {
+  aspect-ratio: 1;
+  width: 168px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--bg-elev-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out);
+}
+.rp-pl-cover img { width: 100%; height: 100%; object-fit: cover; }
+.rp-pl-cover-fallback { color: var(--text-tertiary); }
+.rp-pl-name {
+  font-size: 12px;
+  color: var(--text);
+  font-weight: 600;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding: 0 2px;
+}
+.rp-pl-count {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  line-height: 1.2;
+  padding: 0 2px;
+}
+
+/* 新歌速递 */
+.new-songs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 8px;
+}
+.new-song-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.new-song-item:hover {
+  background: var(--bg-hover);
+}
+.new-song-item.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.new-song-cover {
+  width: 42px;
+  height: 42px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--bg-elev-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+.new-song-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.new-song-meta {
+  flex: 1;
+  min-width: 0;
+}
+.new-song-name {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.new-song-name-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.new-song-name-line .new-song-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.new-song-item.active .new-song-name {
+  color: var(--accent);
+}
+.new-song-artist {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+.new-song-play {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.new-song-item:hover .new-song-play {
+  opacity: 0.7;
+}
+.new-song-item.active .new-song-play {
+  opacity: 1;
+  color: var(--accent);
+}
+
+/* 热搜榜 */
+.hot-search-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px;
+}
+.hot-search-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background 0.15s;
+  cursor: pointer;
+}
+.hot-search-item:hover {
+  background: var(--bg-hover);
+}
+.hot-idx {
+  width: 20px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+.hot-idx.hot-top {
+  color: var(--accent);
+  font-weight: 700;
+}
+.hot-word {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.hot-badge {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-weight: 700;
+  flex-shrink: 0;
+  letter-spacing: 0.3px;
+}
+.hot-badge.hot {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.1);
+}
+.hot-badge.new {
+  color: #52c41a;
+  background: rgba(82, 196, 26, 0.1);
+}
+.hot-badge.recommend {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.hot-score {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
 
 /* 榜单精选 */
 .ranking-section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
@@ -922,7 +1711,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ranking-song.active { color: var(--accent); background: var(--accent-soft); }
 .ranking-idx { width: 20px; text-align: center; font-size: 13px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .ranking-song.active .ranking-idx { color: var(--accent); }
-.ranking-song-name { flex: 1; min-width: 0; font-size: 13px; color: var(--text); }
+.ranking-song-name { min-width: 0; flex: 1; font-size: 13px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ranking-artist { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; max-width: 100px; }
 /* 操作按钮层：仅 hover 时显示，无独立背景（与行 hover 背景融为一体，无割裂） */
 .ranking-actions {
@@ -1007,7 +1796,7 @@ body.has-wallpaper .ranking-song:hover {
 body.has-wallpaper .ranking-song.active {
   background: rgba(250, 35, 59, 0.18);
 }
-body.has-wallpaper .card-cover {
+body.has-wallpaper .rp-pl-cover {
   box-shadow: 0 4px 16px rgba(0,0,0,0.35);
 }
 body.has-wallpaper .ranking-song .ranking-actions {

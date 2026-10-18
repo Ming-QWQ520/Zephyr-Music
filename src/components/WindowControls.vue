@@ -66,7 +66,7 @@ const emit = defineEmits<{
 <!-- 非 scoped 样式：有壁纸时窗口控件毛玻璃半透明 -->
 <style>
 body.has-wallpaper .window-controls {
-  background: rgba(40, 38, 46, 0.55);
+  background: rgba(0, 0, 0, 0.05);
   backdrop-filter: blur(16px) saturate(1.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
   border-color: rgba(255, 255, 255, 0.12);

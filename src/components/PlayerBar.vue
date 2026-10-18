@@ -3,15 +3,14 @@ import { ref, computed, watch, nextTick, onMounted, onUnmounted } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { useSettings } from "@/composables/useSettings";
 import { formatTime } from "@/composables/utils";
-import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew } from "@/api/netease";
-import { apiGet } from "@/api/netease/core";
-import { neteaseSongToSong } from "@/api/netease";
+import { likeSong, getCachedLikeList, refreshLikeList, addLikeCache, removeLikeCache, _cachedUser, commentNew, fmTrash } from "@/api/netease";
 import type { Song } from "@/types";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
 const toast = useToast();
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
+import SongBadge from "@/components/SongBadge.vue";
 
 const store = usePlayerStore();
 const { settings } = useSettings();
@@ -96,6 +95,12 @@ async function openCommentsPopup() {
   store.setView("songcomments");
 }
 
+// ===== 高潮点 / 副歌时间（/song/chorus）=====
+// 单一数据源：在 player store 中预加载 chorusStart（切歌时触发），
+// PlayerBar 与 NowPlaying 共享同一份 chorusMarkFrac / jumpToChorus，避免两处不同步。
+const chorusMarkFrac = computed(() => store.chorusMarkFrac);
+function jumpToChorus() { store.jumpToChorus(); }
+
 type PlayMode = "sequence" | "list" | "single" | "shuffle";
 
 const playMode = computed<PlayMode>(() => {
@@ -127,30 +132,26 @@ function cyclePlayMode() {
 /** 是否显示不感兴趣按钮（仅私人漫游模式） */
 const showDislikeBtn = computed(() => store.isPersonalRoam && store.currentSong?.source === "netease" && !!store.currentSong?.neteaseId);
 
-/** 不感兴趣：标记当前歌曲并换下一首 */
+/** 漫游不感兴趣（/fm_trash）：丢进 FM 垃圾桶（之后不再推荐）并切下一首 */
 async function dislikeCurrentSong() {
   const song = store.currentSong;
   if (!song || !song.neteaseId) return;
+  const trashedIndex = store.currentIndex;
   try {
-    const res = await apiGet<{ code: number; data?: any }>("/recommend/songs/dislike", { id: song.neteaseId });
+    const res = await fmTrash(song.neteaseId);
     if (res.code === 200) {
-      if (res.data?.id) {
-        const newSong = neteaseSongToSong(res.data as any);
-        store.queue[store.currentIndex] = newSong;
-        store._ensureNeteaseUrl(newSong);
-        store._ensureNeteaseLyrics(newSong).then(() => {
-          if (store.currentSong?.id === newSong.id) store.loadLyrics(newSong);
-        });
-        toast.success("已换一首", newSong.name);
-      } else {
-        store.removeFromQueue(store.currentIndex);
-        toast.success("已标记不感兴趣", song.name);
+      toast.success("已标记不感兴趣", `不再推荐「${song.name}」`);
+      // 切到下一首（漫游模式下 next 会自动补充推荐）
+      await store.next();
+      // 从队列移除被丢弃的歌曲
+      if (trashedIndex >= 0 && store.queue[trashedIndex]?.id === song.id) {
+        store.removeFromQueue(trashedIndex);
       }
     } else {
       toast.error("操作失败", "请稍后重试");
     }
   } catch (e) {
-    log.warn("player", "dislike failed", { error: String(e) });
+    log.warn("player", "fm trash failed", { error: String(e) });
     toast.error("操作失败", "请稍后重试");
   }
 }
@@ -187,27 +188,25 @@ const currentLevelLabel = computed(() => {
   return l ? l.label : "标准";
 });
 
-// 切换音质后立即刷新当前歌曲 URL，从之前播放处继续
+// 切换音质后立即刷新当前歌曲 URL，从之前播放处继续。
+// 复用 _restoreTime/_restorePlaying 机制：url watch 会在 loadedmetadata 后 seek，
+// 比手动 store.currentTime 赋值更可靠（不会在元数据加载前 seek 失败）。
 watch(() => settings.audioLevel, async () => {
   const song = store.currentSong;
   if (song && song.source === "netease" && song.neteaseId) {
-    // 保存当前播放进度
     const savedTime = store.currentTime;
     const wasPlaying = store.isPlaying;
-    // 清除缓存 URL，强制重新获取
+    (song as any)._restoreTime = savedTime > 0 ? savedTime : 0;
+    (song as any)._restorePlaying = wasPlaying;
     song.url = "";
     const idx = store.queue.findIndex(s => s.id === song.id);
-    if (idx >= 0) store.queue[idx].url = "";
-    // 重新获取 URL
-    await store._ensureNeteaseUrl(song);
-    // 恢复播放进度
-    store.currentTime = savedTime;
-    // 恢复播放状态
-    if (wasPlaying) {
-      store.isPlaying = false;
-      await nextTick();
-      store.isPlaying = true;
+    if (idx >= 0) {
+      store.queue[idx].url = "";
+      (store.queue[idx] as any)._restoreTime = (song as any)._restoreTime;
+      (store.queue[idx] as any)._restorePlaying = wasPlaying;
     }
+    const ok = await store._ensureNeteaseUrl(song);
+    if (!ok) toast.error("音质切换失败", "获取新音质播放地址失败");
   }
 });
 
@@ -217,7 +216,6 @@ const volHover = ref(false);
 // 播放队列弹窗
 const showQueuePopup = ref(false);
 const queueList = computed(() => store.queue);
-const queueLoading = ref(false);
 
 // 播放队列拖拽排序
 const dragFromIdx = ref<number | null>(null);
@@ -244,20 +242,14 @@ function clearQueue() { store.clearQueue(); }
 
 const qpListRef = ref<HTMLElement | null>(null);
 
-/** 打开播放队列弹窗（先转圈1秒） */
+/** 打开播放队列弹窗（立即显示并定位到当前播放歌曲） */
 function toggleQueuePopup() {
   if (showQueuePopup.value) {
     showQueuePopup.value = false;
     return;
   }
-  // 先显示转圈
-  queueLoading.value = true;
   showQueuePopup.value = true;
-  // 1秒后显示列表，并滚动到当前播放歌曲
-  setTimeout(() => {
-    queueLoading.value = false;
-    nextTick(() => scrollQueueToCurrent(false));
-  }, 1000);
+  nextTick(() => scrollQueueToCurrent(false));
 }
 
 /** 滚动播放队列到当前播放歌曲（直接设置 scrollTop，避免影响父容器滚动） */
@@ -282,8 +274,8 @@ function onQueueContextMenu(e: MouseEvent, song: Song, idx: number) {
 }
 function closeQueueCtxMenu() { queueCtxMenu.value.visible = false; }
 function queueCtxPlay() {
-  const { song, idx } = queueCtxMenu.value;
-  if (song && idx >= 0) { store.currentIndex = idx; store.setPlaying(true); store.loadLyrics(song); }
+  const { idx } = queueCtxMenu.value;
+  if (idx >= 0) store.playAt(idx);
   closeQueueCtxMenu();
 }
 function queueCtxPlayNext() {
@@ -340,7 +332,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </div>
       </div>
       <div class="meta" :class="{ 'auto-hidden': settings.autoHideMiniInfo && store.isPlaying }">
-        <div class="title truncate">{{ store.currentSong?.name || "未在播放" }}</div>
+        <div class="title-line">
+          <span class="title truncate">{{ store.currentSong?.name || "未在播放" }}</span>
+          <SongBadge v-if="store.currentSong" :song="store.currentSong" size="sm" :vip-only="true" />
+        </div>
         <div class="artist truncate">{{ store.currentSong?.artist || "—" }}</div>
       </div>
       <!-- 喜欢按钮 -->
@@ -393,7 +388,16 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
       </div>
       <div class="progress-row" @click.stop @pointerdown.stop>
         <span class="time cur">{{ progressText }}</span>
-        <Slider class="progress" :model-value="progressFrac" :format="(v) => formatTime(v * store.duration)" @change="onSeek" />
+        <div class="progress-wrap">
+          <!-- 高潮起始位置白圆点（点击跳转到高潮点） -->
+          <div
+            v-if="chorusMarkFrac !== null"
+            class="chorus-dot"
+            :style="{ left: (chorusMarkFrac * 100) + '%' }"
+            @click.stop="jumpToChorus"
+          ></div>
+          <Slider class="progress" :model-value="progressFrac" :format="(v) => formatTime(v * store.duration)" @change="onSeek" />
+        </div>
         <span class="time dur">{{ durationText }}</span>
       </div>
     </div>
@@ -447,18 +451,14 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <Icon name="close" :size="18" />
         </button>
       </header>
-      <!-- 加载中转圈 -->
-      <div v-if="queueLoading" class="qp-loading">
-        <div class="spinner" />
-      </div>
-      <div v-else ref="qpListRef" class="qp-list nice-scroll">
+      <div ref="qpListRef" class="qp-list nice-scroll">
         <div
           v-for="(s, idx) in queueList"
           :key="s.id"
           class="qp-item"
           :class="{ active: s.id === store.currentSong?.id, 'drag-over': dragOverIdx === idx && dragFromIdx !== idx, dragging: dragFromIdx === idx }"
           draggable="true"
-          @click="() => { store.currentIndex = idx; store.setPlaying(true); const song = store.queue[idx]; if (song) store.loadLyrics(song); }"
+          @click="store.playAt(idx)"
           @contextmenu.prevent="onQueueContextMenu($event, s, idx)"
           @dragstart="onQueueDragStart($event, idx)"
           @dragover="onQueueDragOver($event, idx)"
@@ -480,7 +480,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
         </div>
       </div>
       <!-- 复位键（浮动在右下角） -->
-      <button v-if="store.currentIndex >= 0 && !queueLoading" class="qp-locate-fab" title="定位当前播放" @click.stop="scrollQueueToCurrent(true)">
+      <button v-if="store.currentIndex >= 0" class="qp-locate-fab" title="定位当前播放" @click.stop="scrollQueueToCurrent(true)">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>
       </button>
     </aside>
@@ -501,12 +501,14 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 <style scoped>
 .player-bar {
+  position: relative;
+  z-index: 10;
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(360px, 2fr) minmax(140px, 1fr);
   align-items: center;
   gap: 18px;
   height: var(--playerbar-h);
-  padding: 0 16px;
+  padding: 0 20px;
   background: var(--bg-glass);
   backdrop-filter: blur(20px) saturate(180%);
   -webkit-backdrop-filter: blur(20px) saturate(180%);
@@ -520,7 +522,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .meta { min-width: 0; flex: 1; transition: opacity 0.3s var(--ease-out); }
 .meta.auto-hidden { opacity: 0; }
 .player-bar:hover .meta.auto-hidden { opacity: 1; }
-.meta .title { font-size: 13px; font-weight: 600; color: var(--text); }
+.meta .title-line { display: flex; align-items: center; gap: 2px; min-width: 0; flex-wrap: wrap; }
+.meta .title { font-size: 13px; font-weight: 600; color: var(--text); min-width: 0; }
 .meta .artist { font-size: 11px; color: var(--text-tertiary); margin-top: 1px; }
 .like-btn { width: 28px; height: 28px; color: var(--text-tertiary); flex-shrink: 0; }
 .like-btn:hover { color: var(--accent); }
@@ -555,8 +558,36 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .ctrl-btn.play:active { transform: scale(0.95); }
 
 .progress-row { display: flex; align-items: center; gap: 8px; width: 100%; max-width: 520px; }
-.progress { flex: 1; }
+.progress-wrap { position: relative; flex: 1; display: flex; align-items: center; }
+.progress { flex: 1; width: 100%; }
 .time { font-size: 11px; color: var(--text-tertiary); font-variant-numeric: tabular-nums; min-width: 38px; text-align: center; }
+
+/* ===== 高潮点标记：进度条上的白圆点（点击跳转） ===== */
+.chorus-dot {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.55), 0 0 4px rgba(255, 255, 255, 0.6);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 2;
+  /* Force GPU compositing for sub-pixel anti-aliasing (消除锯齿) */
+  will-change: transform;
+  backface-visibility: hidden;
+  transition: width 0.15s var(--ease-out), height 0.15s var(--ease-out), box-shadow 0.15s var(--ease-out);
+}
+/* 随进度条 hover 变粗而变大（默认 4px → hover 8px，匹配 track 3px → 7px） */
+.progress-wrap:hover .chorus-dot,
+.chorus-dot:hover {
+  width: 8px;
+  height: 8px;
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.55), 0 0 6px rgba(255, 255, 255, 0.85);
+}
+
 
 .right-block { display: flex; align-items: center; gap: 6px; justify-content: flex-end; position: relative; }
 .level-wrap { position: relative; }
@@ -567,16 +598,17 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   position: absolute;
   bottom: calc(100% + 8px);
   right: 0;
-  background: var(--bg-elev-3);
+  background: rgba(0, 0, 0, 0.5);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 6px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
   z-index: 60;
   min-width: 96px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
 }
 .level-option {
   display: block;
@@ -602,16 +634,12 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   bottom: calc(100% + 6px);
   right: 50%;
   transform: translateX(50%);
-  background: var(--bg-elev-3);
-  border: 1px solid rgba(255,255,255,0.06);
   border-radius: 8px;
-  padding: 12px 8px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.25);
   z-index: 50;
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 124px;
+  height: 90px;
 }
 .volume { width: 14px; height: 100px; flex-shrink: 0; }
 .vol-icon { width: 28px; height: 28px; }
@@ -643,11 +671,12 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   max-width: 90vw;
   height: 420px;
   max-height: 60vh;
-  background: var(--bg-elev-3);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(5px) saturate(1.1);
+  -webkit-backdrop-filter: blur(5px) saturate(1);
   border: 1px solid var(--border-strong);
   border-right: none;
   border-radius: 12px 0 0 12px;
-  box-shadow: -8px 0 32px rgba(0,0,0,0.4);
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -659,10 +688,8 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
   right: 12px; bottom: 12px;
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: var(--accent);
   color: #fff;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   z-index: 10;
   transition: transform 0.15s var(--ease-out), opacity 0.15s;
   cursor: pointer;
@@ -717,10 +744,6 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 /* 从右侧滑入动画 */
 .queue-slide-enter-active, .queue-slide-leave-active { transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s; }
 .queue-slide-enter-from, .queue-slide-leave-to { transform: translateX(100%); opacity: 0; }
-
-/* 队列加载转圈 */
-.qp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
-.qp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 
 /* 评论按钮 */
 .comment-btn { width: 28px; height: 28px; color: var(--text-tertiary); flex-shrink: 0; position: relative; }

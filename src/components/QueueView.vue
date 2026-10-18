@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, nextTick, onMounted } from "vue";
+import { computed, ref, nextTick, onActivated } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import Icon from "@/components/Icon.vue";
+import SongBadge from "@/components/SongBadge.vue";
 
 const store = usePlayerStore();
 
@@ -14,10 +15,7 @@ function play(index: number) {
     store.togglePlay();
     return;
   }
-  store.currentIndex = index;
-  store.setPlaying(true);
-  const s = store.queue[index];
-  if (s) store.loadLyrics(s);
+  store.playAt(index);
 }
 
 function remove(index: number) {
@@ -39,8 +37,8 @@ function scrollToCurrent() {
   list.scrollTo({ top: targetTop, behavior: "smooth" });
 }
 
-/** 打开时自动滚动到当前播放歌曲 */
-onMounted(() => {
+/** 每次进入视图自动滚动到当前播放歌曲（KeepAlive 缓存下 onActivated 每次都触发） */
+onActivated(() => {
   nextTick(() => {
     const idx = store.currentIndex;
     if (idx > 0 && listRef.value) {
@@ -141,7 +139,10 @@ function onDragEnd() {
           <Icon v-else name="music" :size="14" />
         </div>
         <div class="meta">
-          <div class="title truncate">{{ song.name }}</div>
+          <div class="title-line">
+            <span class="title truncate">{{ song.name }}</span>
+            <SongBadge :song="song" size="sm" />
+          </div>
           <div class="artist truncate">{{ song.artist }}</div>
         </div>
         <div class="actions">
@@ -324,6 +325,20 @@ function onDragEnd() {
 .meta {
   flex: 1;
   min-width: 0;
+  overflow: hidden;
+}
+.title-line {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.title-line .title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .meta .title {
   font-size: 13px;

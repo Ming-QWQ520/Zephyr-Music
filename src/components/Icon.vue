@@ -36,6 +36,7 @@ const ICONS: Record<string, string> = {
   history: `<path d="M4 12a8 8 0 1 0 2.3-5.6" stroke-linecap="round"/><path d="M6 4v3.5h3.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8v4.2l3 1.8" stroke-linecap="round" stroke-linejoin="round"/>`,
   settings: `<circle cx="12" cy="12" r="3" /><path d="M19.4 13.5a7.7 7.7 0 0 0 0-3l1.6-1.2-1.8-3.1-1.9.8a7.7 7.7 0 0 0-2.6-1.5L13.3 3h-3.6l-.4 2a7.7 7.7 0 0 0-2.6 1.5l-1.9-.8L2 8.8l1.6 1.2a7.7 7.7 0 0 0 0 3L2 14.2l1.8 3.1 1.9-.8a7.7 7.7 0 0 0 2.6 1.5l.4 2h3.6l.4-2a7.7 7.7 0 0 0 2.6-1.5l1.9.8 1.8-3.1-1.6-1.2Z" stroke-linejoin="round"/>`,
   close: `<path d="m6 6 12 12M18 6 6 18" stroke-linecap="round"/>`,
+  radio: `<circle cx="12" cy="12" r="2"/><path d="M7.76 16.24a6 6 0 0 1 0-8.49m8.49 0a6 6 0 0 1 0 8.49M4.93 19.07a10 10 0 0 1 0-14.14m14.14 0a10 10 0 0 1 0 14.14" stroke-linecap="round" stroke-linejoin="round"/>`,
   chevronDown: `<path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/>`,
   chevronLeft: `<path d="m15 6-6 6 6 6" stroke-linecap="round" stroke-linejoin="round"/>`,
   chevronRight: `<path d="m9 6 6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/>`,
@@ -49,6 +50,8 @@ const ICONS: Record<string, string> = {
   maximize: `<rect x="5" y="5" width="14" height="14" rx="2"/>`,
   folder: `<path d="M4 7a1 1 0 0 1 1-1h4l2 2h8a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7Z" stroke-linejoin="round"/>`,
   download: `<path d="M12 4v10m0 0 4-4m-4 4-4-4" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 19h14" stroke-linecap="round"/>`,
+  upload: `<path d="M12 16V4m0 0 4 4m-4-4-4 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 20h14" stroke-linecap="round"/>`,
+  transfer: `<path d="M4 8h13m0 0-3-3m3 3-3 3" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 16H7m0 0 3-3m-3 3 3 3" stroke-linecap="round" stroke-linejoin="round"/>`,
   cast: `<path d="M4 8V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16a2 2 0 0 1 2 2M4 12a6 6 0 0 1 6 6" stroke-linecap="round"/>`,
   lyrics: `<path d="M5 6h14M5 10h14M5 14h8M5 18h10" stroke-linecap="round"/>`,
   palette: `<path d="M12 3a9 9 0 1 0 0 18c1 0 1.6-.8 1.6-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H16a5 5 0 0 0 5-5c0-3.9-4-7-9-7Z" stroke-linejoin="round"/><circle cx="7.5" cy="11" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="16.5" cy="11" r="1" fill="currentColor" stroke="none"/>`,
@@ -66,6 +69,13 @@ const ICONS: Record<string, string> = {
   wallpaper: `<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8" cy="9" r="1.5"/><path d="m4 17 4-4 3 3 3-2 6 5" stroke-linecap="round" stroke-linejoin="round"/>`,
   sun: `<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" stroke-linecap="round"/>`,
   moon: `<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/>`,
+  eye: `<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" stroke-linejoin="round"/><circle cx="12" cy="12" r="3"/>`,
+  eyeOff: `<path d="M9.9 5.7A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a15 15 0 0 1-3 3.6M6.5 7.6A15 15 0 0 0 2.5 12S6 18.5 12 18.5a9.3 9.3 0 0 0 3.7-.7" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 10a3 3 0 0 0 4 4" stroke-linecap="round"/><path d="m4 4 16 16" stroke-linecap="round"/>`,
+  phone: `<path d="M7 4h3l1.5 4.5-2 1.5a12 12 0 0 0 4.5 4.5l1.5-2 4.5 1.5v3a2 2 0 0 1-2 2A16 16 0 0 1 5 6a2 2 0 0 1 2-2Z" stroke-linejoin="round"/>`,
+  mail: `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6" stroke-linecap="round" stroke-linejoin="round"/>`,
+  bell: `<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>`,
+  warn: `<path d="M12 3 2 20h20L12 3Z" stroke-linejoin="round"/><path d="M12 10v4M12 17h.01" stroke-linecap="round"/>`,
+  alert: `<circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01" stroke-linecap="round"/>`,
 };
 
 const inner = computed(() => ICONS[props.name] || "");

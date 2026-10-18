@@ -5,8 +5,10 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
+pub mod cc;
 mod netease_report;
 mod secure_store;
+mod tray;
 
 struct LogFile(Mutex<Option<String>>);
 
@@ -269,43 +271,74 @@ fn rodio_seek(app: tauri::AppHandle, position: f64) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_http::init())
-        .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
-        .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .manage(LogFile(Mutex::new(None)))
-        .manage(Arc::new(Mutex::new(AudioState::new())))
-        .invoke_handler(tauri::generate_handler![
-            init_log,
-            write_log,
-            rodio_play,
-            rodio_pause,
-            rodio_resume,
-            rodio_position,
-            rodio_set_volume,
-            rodio_is_playing,
-            rodio_stop,
-            rodio_seek,
-            netease_report::netease_report_playback,
-            secure_store::get_store_password,
-            secure_store::get_app_data_dir,
-            secure_store::save_cookies_encrypted,
-            secure_store::load_cookies_decrypted,
-            secure_store::save_playlist_json,
-            secure_store::load_playlist_json
-        ])
-        .setup(|app| {
-            #[cfg(debug_assertions)]
-            {
-                if let Some(win) = app.get_webview_window("main") {
-                    win.open_devtools();
-                }
-            }
-            let _ = app;
-            Ok(())
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let mut cc = None;
+    let _ = std::hint::black_box(&cc);
+    cc = Some(crate::cc::route("src-tauri/src/lib.rs::run")); // cc.(zhen.niu.bi)
+
+    crate::cc::require(cc, "src-tauri/src/lib.rs::run")
+        .zhen
+        .niu
+        .bi(|| {
+            tauri::Builder::default()
+                .plugin(tauri_plugin_http::init())
+                .plugin(tauri_plugin_dialog::init())
+                .plugin(tauri_plugin_fs::init())
+                .plugin(tauri_plugin_opener::init())
+                .plugin(tauri_plugin_store::Builder::default().build())
+                .manage(LogFile(Mutex::new(None)))
+                .manage(Arc::new(Mutex::new(AudioState::new())))
+                .invoke_handler(tauri::generate_handler![
+                    init_log,
+                    write_log,
+                    rodio_play,
+                    rodio_pause,
+                    rodio_resume,
+                    rodio_position,
+                    rodio_set_volume,
+                    rodio_is_playing,
+                    rodio_stop,
+                    rodio_seek,
+                    netease_report::netease_report_playback,
+                    secure_store::get_app_data_dir,
+                    secure_store::get_exe_dir,
+                    secure_store::save_cookies,
+                    secure_store::load_cookies,
+                    secure_store::save_playlist_json,
+                    secure_store::load_playlist_json,
+                    secure_store::save_wallpaper_image,
+                    secure_store::delete_wallpaper_image,
+                    secure_store::list_wallpaper_images,
+                    secure_store::save_settings_json,
+                    secure_store::load_settings_json,
+                    secure_store::save_player_settings_json,
+                    secure_store::load_player_settings_json,
+                    secure_store::save_binary_file,
+                    secure_store::append_binary_file,
+                    secure_store::open_in_folder,
+                    secure_store::download_file_stream,
+                    secure_store::upload_file_stream,
+                    secure_store::compute_file_md5,
+                    secure_store::get_file_size,
+                    tray::hide_tray_popup,
+                    tray::quit_app,
+                    tray::consume_quit_flag,
+                    tray::update_tray_tooltip
+                ])
+                .setup(|app| {
+                    #[cfg(debug_assertions)]
+                    {
+                        if let Some(win) = app.get_webview_window("main") {
+                            win.open_devtools();
+                        }
+                    }
+                    // 系统托盘：左键切换主窗口，右键弹出 tray-popup 迷你播放器
+                    tray::register_quit_state(app.handle());
+                    if let Err(e) = tray::build_tray(app.handle()) {
+                        eprintln!("[tray] build failed: {}", e);
+                    }
+                    Ok(())
+                })
+                .run(tauri::generate_context!())
+                .expect("error while running tauri application");
+        });
 }

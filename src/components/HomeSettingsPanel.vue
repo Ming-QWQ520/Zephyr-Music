@@ -7,11 +7,18 @@
  *  - 主题色（首页独立）
  *  - 字体缩放
  *  - 侧边栏透明
+ *
+ * 壁纸持久化：
+ *  - 选择本地图片时，通过 Rust 命令 save_wallpaper_image 把图片复制到
+ *    exe 同级 data/wallpaper/ 目录，原文件被移动/删除后壁纸仍然有效。
+ *  - 清除或替换壁纸时，自动删除旧持久化文件，避免磁盘堆积。
+ *  - 网络 URL / data URL 输入不经过持久化（前者用户自管，后者自包含）。
  */
 import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
 import { useHomeSettings } from "@/composables/useHomeSettings";
 import { useToast } from "@/composables/useToast";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 const toast = useToast();
 
 withDefaults(defineProps<{
@@ -29,35 +36,94 @@ const { settings, defaults } = useHomeSettings();
 const ACCENT_PRESETS = ["#fa233b", "#ff6b35", "#ffd23f", "#06d6a0", "#118ab2", "#9d4edd", "#ef476f", "#073b4c"];
 
 function resetAll() {
+  // 重置时也清理持久化壁纸文件
+  void cleanupPersistedWallpaper(settings.bgImage);
   Object.assign(settings, defaults);
 }
 
-/** 选择本地图片作为壁纸 */
+/**
+ * 判断 bgImage 是否为持久化到 data/wallpaper/ 的本地资源 URL。
+ * 持久化 URL 形如：http(s)://asset.localhost/<绝对路径>，且路径中包含 data/wallpaper/。
+ */
+function isPersistedWallpaper(url: string): boolean {
+  if (!url) return false;
+  const lower = url.toLowerCase();
+  if (!lower.includes("asset.localhost") && !lower.startsWith("asset:")) return false;
+  return /data[\\/]wallpaper[\\/]/.test(url);
+}
+
+/** 从 asset URL 中解析出本地绝对路径，用于删除持久化文件 */
+function extractPathFromAssetUrl(url: string): string | null {
+  try {
+    const idx = url.toLowerCase().indexOf("asset.localhost/");
+    if (idx >= 0) {
+      const raw = url.slice(idx + "asset.localhost/".length);
+      return decodeURIComponent(raw);
+    }
+    if (url.toLowerCase().startsWith("asset://")) {
+      const rest = url.slice("asset://".length);
+      const slash = rest.indexOf("/");
+      return slash >= 0 ? decodeURIComponent(rest.slice(slash + 1)) : decodeURIComponent(rest);
+    }
+  } catch (e) {
+    console.warn("home-settings", "extractPathFromAssetUrl failed", { url: url.substring(0, 80), error: String(e) });
+  }
+  return null;
+}
+
+/** 清理持久化壁纸文件（如果当前 bgImage 指向 data/wallpaper/） */
+async function cleanupPersistedWallpaper(currentBgImage: string): Promise<void> {
+  if (!isPersistedWallpaper(currentBgImage)) return;
+  const path = extractPathFromAssetUrl(currentBgImage);
+  if (!path) return;
+  try {
+    await invoke<void>("delete_wallpaper_image", { filePath: path });
+    console.log("home-settings", "wallpaper file deleted", { path });
+  } catch (e) {
+    console.warn("home-settings", "delete_wallpaper_image failed", { path, error: String(e) });
+  }
+}
+
+/** 选择本地图片作为壁纸（持久化到 data/wallpaper/） */
 async function pickWallpaper() {
+  const oldBgImage = settings.bgImage;
+
   try {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const file = await open({
       multiple: false,
       filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "gif"] }],
     });
-    if (typeof file === "string") {
-      // Tauri 2: 用 convertFileSrc 把本地路径转成 asset:// 协议 URL
-      // CSP 允许 http://asset.localhost / https://asset.localhost
-      let url = file;
-      if (!file.startsWith("http") && !file.startsWith("data:") && !file.startsWith("asset:")) {
-        try {
-          const { convertFileSrc } = await import("@tauri-apps/api/core");
-          url = convertFileSrc(file);
-        } catch {
-          url = `localfile://${file}`;
-        }
-      }
-      settings.bgImage = url;
-      settings.bgType = "image";
-      toast.success("壁纸已设置", "背景将覆盖整个窗口");
+    if (typeof file !== "string") return;
+
+    // 调用 Rust 命令把图片复制到 data/wallpaper/
+    const suggested = file.split(/[\\/]/).pop() || "";
+    let destPath: string;
+    try {
+      destPath = await invoke<string>("save_wallpaper_image", {
+        sourcePath: file,
+        suggestedName: suggested,
+      });
+    } catch (e) {
+      console.error("home-settings", "save_wallpaper_image failed", { error: String(e) });
+      toast.error("壁纸持久化失败", String(e));
+      return;
     }
+
+    // 转成 asset:// URL 供 <img> 加载
+    const url = convertFileSrc(destPath);
+    settings.bgImage = url;
+    settings.bgType = "image";
+
+    // 替换时清理旧持久化文件（新壁纸已经写入成功后再删旧，避免误删）
+    if (oldBgImage && oldBgImage !== url) {
+      void cleanupPersistedWallpaper(oldBgImage);
+    }
+
+    toast.success("壁纸已设置", "已持久化保存，原文件移动/删除不影响");
   } catch (e) {
-    // 非 tauri 环境（浏览器预览）用 input file
+    // 非 tauri 环境（浏览器预览）用 input file，转 data URL 自包含
+    console.warn("home-settings", "pickWallpaper fallback to browser input", { error: String(e) });
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "image/*";
@@ -76,7 +142,8 @@ async function pickWallpaper() {
   }
 }
 
-function clearWallpaper() {
+async function clearWallpaper() {
+  await cleanupPersistedWallpaper(settings.bgImage);
   settings.bgImage = "";
   settings.bgType = "none";
 }
@@ -84,7 +151,12 @@ function clearWallpaper() {
 function useUrlWallpaper() {
   const url = prompt("输入图片 URL：");
   if (url && url.trim()) {
-    settings.bgImage = url.trim();
+    const trimmed = url.trim();
+    // 替换前清理旧持久化文件
+    if (settings.bgImage && settings.bgImage !== trimmed) {
+      void cleanupPersistedWallpaper(settings.bgImage);
+    }
+    settings.bgImage = trimmed;
     settings.bgType = "image";
     toast.success("壁纸已设置", "背景将覆盖整个窗口");
   }
@@ -108,7 +180,7 @@ function useUrlWallpaper() {
           <!-- 背景 -->
           <section class="hs-section">
             <h3>背景壁纸</h3>
-            <p class="hs-hint">自定义全屏壁纸，覆盖整个窗口（含标题栏）。</p>
+            <p class="hs-hint">自定义全屏壁纸，覆盖整个窗口（含标题栏）。本地图片会自动持久化到 data/wallpaper/ 目录，原文件移动/删除后壁纸仍然有效。</p>
 
             <div class="hs-row">
               <div class="hs-label">背景类型</div>
@@ -213,6 +285,25 @@ function useUrlWallpaper() {
             </div>
           </section>
 
+          <!-- 窗口 -->
+          <section class="hs-section">
+            <h3>窗口</h3>
+            <p class="hs-hint">点击窗口关闭按钮 / Alt+F4 时的行为。保存至托盘后可从托盘图标重新打开或退出。</p>
+            <div class="hs-row">
+              <div class="hs-label">退出键动作</div>
+              <div class="hs-seg">
+                <button
+                  :class="{ active: settings.exitAction === 'tray' }"
+                  @click="settings.exitAction = 'tray'"
+                >保存至托盘</button>
+                <button
+                  :class="{ active: settings.exitAction === 'quit' }"
+                  @click="settings.exitAction = 'quit'"
+                >直接关闭</button>
+              </div>
+            </div>
+          </section>
+
           <!-- 重置 -->
           <section class="hs-section">
             <button class="hs-btn danger full" @click="resetAll">
@@ -287,11 +378,10 @@ function useUrlWallpaper() {
 
 .wallpaper-block { display: flex; flex-direction: column; gap: 10px; }
 .wallpaper-preview {
-  width: 100%; height: 140px; border-radius: 10px;
+  width: 100%; height: 100%; border-radius: 10px;
   background-color: var(--bg-elev-1);
   border: 1px solid var(--border); overflow: hidden; position: relative;
 }
-.wallpaper-preview img { width: 100%; height: 100%; object-position: center; display: block; }
 .wallpaper-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--text-tertiary); font-size: 12px; }
 .wallpaper-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
@@ -314,7 +404,5 @@ function useUrlWallpaper() {
 <style>
 body.has-wallpaper .home-settings-view .home-settings-card {
   background: rgba(33, 31, 38, 0.55);
-  backdrop-filter: blur(16px) saturate(1.4);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
 }
 </style>

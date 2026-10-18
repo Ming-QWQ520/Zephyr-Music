@@ -4,6 +4,7 @@ import Icon from "@/components/Icon.vue";
 import Slider from "@/components/Slider.vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useSettings } from "@/composables/useSettings";
+import { useHomeSettings } from "@/composables/useHomeSettings";
 
 /** 打开外部链接（通过 opener 插件调用系统浏览器） */
 async function openLink(url: string) {
@@ -24,6 +25,8 @@ const emit = defineEmits<{
 }>();
 
 const { settings, defaults } = useSettings();
+// 退出键动作与首页设置共用同一字段（home-settings store，App.vue 的关闭行为消费）
+const { settings: homeSettings } = useHomeSettings();
 
 type TabKey = "appearance" | "cover" | "background" | "lyrics" | "font" | "misc" | "experimental" | "about";
 
@@ -211,14 +214,9 @@ onMounted(async () => {
               </div>
               <div class="row">
                 <div class="label">封面清晰度</div>
-                <div class="seg">
-                  <button
-                    v-for="m in [200, 300, 400, 500] as const"
-                    :key="m"
-                    :class="{ active: settings.coverQuality === m }"
-                    @click="settings.coverQuality = m"
-                  >{{ m }}p</button>
-                </div>
+                <select class="row-select" :value="settings.coverQuality" @change="settings.coverQuality = parseInt(($event.target as HTMLSelectElement).value)">
+                  <option v-for="m in [200, 300, 400, 500, 800, 1000]" :key="m" :value="m">{{ m }}p ({{ m }}x{{ m }})</option>
+                </select>
               </div>
               <div class="row toggle">
                 <div class="label">封面阴影</div>
@@ -252,6 +250,7 @@ onMounted(async () => {
 
               <div class="row subgroup"><div class="label subgroup-title">基础</div></div>
               <div class="row toggle"><div class="label">首行加粗</div><button class="switch" :class="{ on: settings.boldFirstLine }" @click="settings.boldFirstLine = !settings.boldFirstLine" /></div>
+              <div class="row toggle"><div class="label">强制使用逐字歌词</div><button class="switch" :class="{ on: settings.forceUseYrc }" @click="settings.forceUseYrc = !settings.forceUseYrc" /></div>
               <div class="row toggle"><div class="label">显示翻译</div><button class="switch" :class="{ on: settings.showTranslation }" @click="settings.showTranslation = !settings.showTranslation" /></div>
               <div class="row toggle"><div class="label">显示罗马音</div><button class="switch" :class="{ on: settings.showRomaji }" @click="settings.showRomaji = !settings.showRomaji" /></div>
               <div class="row"><div class="label">当前行对齐</div><div class="seg"><button v-for="m in ['left', 'center'] as const" :key="m" :class="{ active: settings.currentLyricAlign === m }" @click="settings.currentLyricAlign = m">{{ m === 'left' ? '左' : '中' }}</button></div></div>
@@ -282,7 +281,7 @@ onMounted(async () => {
 
               <div class="row subgroup"><div class="label subgroup-title">3D 旋转</div></div>
               <div class="row toggle"><div class="label">启用 3D 旋转</div><button class="switch" :class="{ on: settings.lyricRotate }" @click="settings.lyricRotate = !settings.lyricRotate" /></div>
-              <div class="row"><div class="label">旋转曲率</div><Slider class="row-slider" :model-value="settings.rotateCurvature / 90" :format="(v) => `${Math.round(v * 90)}`" @change="(v) => settings.rotateCurvature = Math.round(v * 90)" /></div>
+              <div v-if="settings.lyricRotate" class="row"><div class="label">旋转曲率</div><Slider class="row-slider" :model-value="settings.rotateCurvature / 90" :format="(v) => `${Math.round(v * 90)}`" @change="(v) => settings.rotateCurvature = Math.round(v * 90)" /></div>
               <div v-if="settings.lyricRotate" class="row"><div class="label">旋转歌词大小</div><Slider class="row-slider" :model-value="(settings.rotateLyricFontSize - 14) / 40" :format="(v) => `${Math.round(14 + v * 40)}px`" @change="(v) => settings.rotateLyricFontSize = Math.round(14 + v * 40)" /></div>
               <div v-if="settings.lyricRotate" class="row"><div class="label">旋转歌词间距</div><Slider class="row-slider" :model-value="settings.rotateLyricLineGap / 80" :format="(v) => `${Math.round(v * 80)}px`" @change="(v) => settings.rotateLyricLineGap = Math.round(v * 80)" /></div>
             </section>
@@ -312,14 +311,19 @@ onMounted(async () => {
               <h3>杂项</h3>
               <div class="row">
                 <div class="label">音质</div>
-                <div class="seg audio-level-seg">
-                  <button
-                    v-for="m in ['standard', 'higher', 'exhigh', 'lossless', 'hires', 'jyeffect', 'sky', 'dolby', 'jymaster'] as const"
-                    :key="m"
-                    :class="{ active: settings.audioLevel === m }"
-                    @click="settings.audioLevel = m"
-                  >{{ ({ standard: '标准', higher: '较高', exhigh: '极高', lossless: '无损', hires: 'Hi-Res', jyeffect: '高清环绕', sky: '沉浸环绕', dolby: '杜比全景', jymaster: '超清母带' } as const)[m] }}</button>
-                </div>
+                <select class="row-select" :value="settings.audioLevel" @change="settings.audioLevel = ($event.target as HTMLSelectElement).value">
+                  <option v-for="m in [
+                    { key: 'standard', label: '标准' },
+                    { key: 'higher', label: '较高' },
+                    { key: 'exhigh', label: '极高' },
+                    { key: 'lossless', label: '无损' },
+                    { key: 'hires', label: 'Hi-Res' },
+                    { key: 'jyeffect', label: '高清环绕' },
+                    { key: 'sky', label: '沉浸环绕' },
+                    { key: 'dolby', label: '杜比全景' },
+                    { key: 'jymaster', label: '超清母带' },
+                  ]" :key="m.key" :value="m.key">{{ m.label }}</option>
+                </select>
               </div>
               <div class="row toggle">
                 <div class="label">隐藏播放控件</div>
@@ -337,11 +341,62 @@ onMounted(async () => {
                 <div class="label">首页封面旋转</div>
                 <button class="switch" :class="{ on: settings.coverRotation }" @click="settings.coverRotation = !settings.coverRotation" />
               </div>
+              <div class="row">
+                <div class="label">
+                  退出键动作
+                  <small>点击窗口关闭按钮 / Alt+F4 时的行为（与首页设置互通）</small>
+                </div>
+                <div class="seg">
+                  <button :class="{ active: homeSettings.exitAction === 'tray' }" @click="homeSettings.exitAction = 'tray'">保存至托盘</button>
+                  <button :class="{ active: homeSettings.exitAction === 'quit' }" @click="homeSettings.exitAction = 'quit'">直接关闭</button>
+                </div>
+              </div>
+              <div class="row">
+                <div class="label">
+                  未聚焦窗口时
+                  <small>窗口失去焦点且未置顶（含隐藏到托盘）时暂停歌词滚动与渲染，聚焦或置顶后恢复，降低后台 CPU/GPU 占用</small>
+                </div>
+                <div class="seg">
+                  <button :class="{ active: settings.unfocusedRender === 'pause' }" @click="settings.unfocusedRender = 'pause'">暂停歌词</button>
+                  <button :class="{ active: settings.unfocusedRender === 'normal' }" @click="settings.unfocusedRender = 'normal'">正常渲染</button>
+                </div>
+              </div>
               <div class="row toggle">
-                <div class="label">启动后自动播放</div>
-                <button class="switch" :class="{ on: settings.autoPlayOnStartup }" @click="settings.autoPlayOnStartup = !settings.autoPlayOnStartup" />
+                <div class="label">预加载下一首</div>
+                <button class="switch" :class="{ on: settings.preloadNextSong }" @click="settings.preloadNextSong = !settings.preloadNextSong" />
+              </div>
+              <div class="row toggle">
+                <div class="label">强制 1:1 封面</div>
+                <button class="switch" :class="{ on: settings.forceSquareCover }" @click="settings.forceSquareCover = !settings.forceSquareCover" />
+              </div>
+              <div class="row toggle">
+                <div class="label">
+                  浏览器媒体控制
+                  <small>向系统报告播放状态，支持媒体键（播放/暂停/上一首/下一首/进度）控制</small>
+                </div>
+                <button class="switch" :class="{ on: settings.mediaSessionEnabled }" @click="settings.mediaSessionEnabled = !settings.mediaSessionEnabled" />
               </div>
 
+              <div class="row subgroup"><div class="label subgroup-title">百科信息栏</div></div>
+              <div class="row">
+                <div class="label">信息栏位置</div>
+                <select class="row-select" :value="settings.wikiInfoBarPosition" @change="settings.wikiInfoBarPosition = ($event.target as HTMLSelectElement).value as 'top' | 'bottom'">
+                  <option value="top">顶部</option>
+                  <option value="bottom">底部</option>
+                </select>
+              </div>
+              <div class="row toggle">
+                <div class="label">显示进度条</div>
+                <button class="switch" :class="{ on: settings.wikiInfoBarShowProgress }" @click="settings.wikiInfoBarShowProgress = !settings.wikiInfoBarShowProgress" />
+              </div>
+              <div class="row toggle">
+                <div class="label">显示播放顺序</div>
+                <button class="switch" :class="{ on: settings.wikiInfoBarShowPlayMode }" @click="settings.wikiInfoBarShowPlayMode = !settings.wikiInfoBarShowPlayMode" />
+              </div>
+              <div class="row toggle">
+                <div class="label">显示播放列表</div>
+                <button class="switch" :class="{ on: settings.wikiInfoBarShowQueue }" @click="settings.wikiInfoBarShowQueue = !settings.wikiInfoBarShowQueue" />
+              </div>
             </section>
 
             <!-- Experimental -->
@@ -646,10 +701,11 @@ onMounted(async () => {
 
 .seg {
   display: inline-flex;
-  background: var(--bg-elev-3);
-  border-radius: 8px;
-  padding: 2px;
-  gap: 2px;
+  background: var(--bg-elev-1, var(--bg-elev-3));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 3px;
   /* Allow seg buttons to wrap on narrow panels instead of overflowing. */
   flex-wrap: wrap;
   /* Seg takes remaining space after the label, but can also wrap below it. */
@@ -658,18 +714,47 @@ onMounted(async () => {
 }
 .seg.wrap { flex-wrap: wrap; }
 .seg button {
-  padding: 5px 10px;
-  border-radius: 6px;
+  padding: 5px 12px;
+  border-radius: 7px;
   font-size: 12px;
+  font-weight: 500;
   color: var(--text-secondary);
-  transition: color 0.15s, background 0.15s;
+  transition: color 0.18s var(--ease-out), background 0.18s var(--ease-out),
+    box-shadow 0.18s var(--ease-out), transform 0.12s var(--ease-out);
   white-space: nowrap;
 }
-.seg button:hover { color: var(--text); }
+.seg button:hover { color: var(--text); background: var(--bg-hover); }
+.seg button:active { transform: scale(0.95); }
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .seg button.active {
-  color: var(--text);
-  background: var(--bg-active);
+  color: #fff;
+  font-weight: 600;
+  background: var(--accent);
+  box-shadow: 0 2px 8px -2px rgba(0, 0, 0, 0.35);
 }
+.seg button.active:hover { background: var(--accent); filter: brightness(1.08); }
+
+/* 下拉选择框 */
+.row-select {
+  height: 32px;
+  padding: 0 28px 0 12px;
+  background: var(--bg-elev-2, var(--bg-elev-1));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 0.15s;
+}
+.row-select:hover { border-color: var(--accent); }
+.row-select:focus { border-color: var(--accent); }
 
 .swatches {
   display: flex;
@@ -713,7 +798,7 @@ onMounted(async () => {
   border-radius: 11px;
   background: var(--bg-elev-3);
   border: 1px solid var(--border);
-  transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out);
+  transition: background 0.18s var(--ease-out), border-color 0.18s var(--ease-out), box-shadow 0.18s var(--ease-out);
 }
 .switch::after {
   content: "";
@@ -726,6 +811,9 @@ onMounted(async () => {
   background: var(--text-secondary);
   transition: transform 0.18s var(--ease-out), background 0.18s var(--ease-out);
 }
+.switch:hover { border-color: var(--accent); }
+.switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch:active::after { transform: scale(1.15); }
 .switch.on {
   background: var(--accent);
   border-color: transparent;
@@ -733,7 +821,9 @@ onMounted(async () => {
 .switch.on::after {
   background: #fff;
   transform: translateX(18px);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
 }
+.switch.on:active::after { transform: translateX(18px) scale(1.15); }
 
 .about-card {
   display: flex;

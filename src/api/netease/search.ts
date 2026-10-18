@@ -1,6 +1,14 @@
-/** 网易云搜索 API */
+/** 网易云搜索 API
+ *
+ * 模块职责（高内聚）：
+ *   - 搜索（单曲/专辑/歌手/歌单/用户/MV/歌词/综合）
+ *   - 搜索建议（PC端 / 移动端）
+ *   - 搜索多重匹配
+ *
+ * 依赖：core.ts（apiGet/TAG）
+ */
 import { log } from "@/composables/logger";
-import { apiGet } from "./core";
+import { apiGet, TAG } from "./core";
 import type { NeteaseSong } from "@/types";
 
 /** 搜索（网易云 API /search）
@@ -55,6 +63,33 @@ export async function searchSuggest(keywords: string, type: "mobile" | "pc" = "p
       alPicUrl: firstSong.al?.picUrl || firstSong.album?.picUrl,
       dt: firstSong.dt, duration: firstSong.duration,
     } : null,
+  });
+  return r;
+}
+
+/** 搜索多重匹配（/search/multimatch）
+ *  返回多种类型的匹配结果（歌曲/歌手/歌单/MV 等） */
+export async function searchMultimatch(keywords: string): Promise<{
+  code: number;
+  result?: {
+    song?: NeteaseSong[];
+    artist?: { id: number; name: string; picUrl?: string; alias?: string[] }[];
+    album?: { id: number; name: string; artist?: { name: string } }[];
+    playlist?: { id: number; name: string; coverImgUrl?: string }[];
+    mv?: { id: number; name: string; cover?: string; artistName?: string }[];
+    order?: string[];
+  };
+}> {
+  log.info(TAG, "searchMultimatch()", { keywords });
+  const r = await apiGet("/search/multimatch", { keywords });
+  log.info(TAG, "searchMultimatch result", {
+    code: r.code,
+    order: r.result?.order,
+    songCount: r.result?.song?.length || 0,
+    artistCount: r.result?.artist?.length || 0,
+    albumCount: r.result?.album?.length || 0,
+    playlistCount: r.result?.playlist?.length || 0,
+    mvCount: r.result?.mv?.length || 0,
   });
   return r;
 }

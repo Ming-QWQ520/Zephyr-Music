@@ -14,13 +14,13 @@
  * 永不卸载（因为是单例）—— 它们只 watch 应用级状态（store.currentSong 等），
  * 视图关闭时不产生副作用。
  */
-import { ref, computed, watch, nextTick, type Ref } from "vue";
+import { ref, computed, watch, nextTick, effectScope, type Ref } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import { formatTime } from "@/composables/utils";
 import { log } from "@/composables/logger";
 import { useToast } from "@/composables/useToast";
 import { useSettings } from "@/composables/useSettings";
-import { likeSong, getCachedLikeList, addLikeCache, removeLikeCache } from "@/api/netease";
+import { likeSong, getCachedLikeList, addLikeCache, removeLikeCache, songWikiSummary, type SongWikiSummary } from "@/api/netease";
 
 // ===== PlayMode 常量（与 PlayerBar 共享语义） =====
 export type PlayMode = "sequence" | "list" | "single" | "shuffle";
@@ -121,9 +121,18 @@ export function parseLyricLine(raw: string): { text: string; translation?: strin
 
 // ===== 单例懒创建 =====
 let _api: NowPlayingApi | null = null;
+/** 独立的 effect scope，确保 watchers 不会被绑定到任何组件的 setup scope
+ *  （否则 NowPlayingView 卸载时 watchers 会被销毁，导致百科等自动刷新失效）。 */
+const _singletonScope = effectScope(true);
 
 export function useNowPlaying(): NowPlayingApi {
-  if (!_api) _api = createApi();
+  if (!_api) {
+    let api: NowPlayingApi;
+    _singletonScope.run(() => {
+      api = createApi();
+    });
+    _api = api!;
+  }
   return _api;
 }
 
@@ -155,10 +164,18 @@ function createApi() {
   // ----- 布局状态 -----
   const showSettings = ref(false);
   const showQueue = ref(false);
-  const queueLoading = ref(false);
+  const showWiki = ref(false);
   const topbarVisible = ref(false);
   /** 播放列表 DOM 引用（NpQueuePanel 通过 template ref 绑定） */
   const qpListRef = ref<HTMLElement | null>(null);
+
+  /** 歌曲百科数据 + 加载状态 */
+  const wikiSummary = ref<SongWikiSummary | null>(null);
+  const wikiLoading = ref(false);
+  /** 已加载百科对应的歌曲 neteaseId，用于匹配判断是否需要刷新 */
+  const wikiLoadedSongId = ref<number | null>(null);
+  let _wikiPromise: Promise<void> | null = null;
+  let _wikiTargetId: number | null = null;
 
   let hideTopbarTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -187,16 +204,71 @@ function createApi() {
     } catch {}
   }
 
-  /** 切换播放列表面板（先转圈1秒） */
+  /** 切换播放列表面板（立即显示并定位到当前播放歌曲） */
   function toggleQueue() {
     if (showQueue.value) { showQueue.value = false; return; }
-    queueLoading.value = true;
     showQueue.value = true;
-    setTimeout(() => {
-      queueLoading.value = false;
-      // 打开后滚动到当前播放歌曲
-      nextTick(() => scrollQueueToCurrent(false));
-    }, 1000);
+    nextTick(() => scrollQueueToCurrent(false));
+  }
+
+  /** ===== 歌曲百科 ===== */
+  /** 拉取当前歌曲的百科数据（仅网易云歌曲）。带 Promise 共享避免重复请求。 */
+  async function preloadWiki() {
+    const s = store.currentSong;
+    if (!s || s.source !== "netease" || !s.neteaseId) {
+      wikiSummary.value = null;
+      wikiLoadedSongId.value = null;
+      return;
+    }
+    const targetId = s.neteaseId;
+    // 已加载同一首歌的百科数据 → 不重复请求
+    if (wikiLoadedSongId.value === targetId && wikiSummary.value) return;
+    // Promise 共享：同一首歌已有请求在飞则复用
+    if (_wikiPromise && _wikiTargetId === targetId) return _wikiPromise;
+    // 新歌曲：立即清空旧数据（让 UI 进入 loading 态，避免显示上一首的百科）
+    wikiSummary.value = null;
+    wikiLoadedSongId.value = null;
+    _wikiTargetId = targetId;
+    _wikiPromise = (async () => {
+      wikiLoading.value = true;
+      try {
+        const res = await songWikiSummary(targetId);
+        // 竞态保护
+        if (store.currentSong?.neteaseId !== targetId) {
+          log.info("nowplaying", "skipped stale wiki response", { targetId });
+          return;
+        }
+        wikiSummary.value = res;
+        wikiLoadedSongId.value = targetId;
+        log.info("nowplaying", "wiki loaded", {
+          songId: targetId,
+          blocksCount: res.blocks?.length || res.data?.blocks?.length || 0,
+        });
+      } catch (e) {
+        log.warn("nowplaying", "load wiki failed", { songId: targetId, error: String(e) });
+      } finally {
+        wikiLoading.value = false;
+        _wikiPromise = null;
+        _wikiTargetId = null;
+      }
+    })();
+    return _wikiPromise;
+  }
+
+  /** 切换百科面板：打开时按歌曲 ID 匹配，仅在 ID 不符时刷新 */
+  function toggleWiki() {
+    if (showWiki.value) {
+      showWiki.value = false;
+      return;
+    }
+    showWiki.value = true;
+    // 匹配歌曲 ID：如果已加载的百科不是当前歌曲的，才重新拉取
+    void preloadWiki();
+  }
+
+  /** 关闭百科面板 */
+  function closeWiki() {
+    showWiki.value = false;
   }
 
   /** 滚动播放列表到当前歌曲（直接设置 scrollTop，避免影响父容器滚动） */
@@ -246,6 +318,13 @@ function createApi() {
   // ----- 进度 -----
   const progressFrac = computed(() => store.progress);
   function onSeek(f: number) { store.seekByFraction(f); }
+
+  // ----- 高潮点 / 副歌时间（/song/chorus）-----
+  // 单一数据源：在 player store 中预加载 chorusStart（切歌时触发），
+  // PlayerBar 与 NowPlaying 共享同一份 chorusMarkFrac / jumpToChorus，避免两处不同步。
+  const chorusMarkFrac = computed(() => store.chorusMarkFrac);
+  function jumpToChorus() { store.jumpToChorus(); }
+
 
   // ----- 音质 -----
   function cycleAudioLevel() {
@@ -420,16 +499,38 @@ function createApi() {
   const queueList = computed(() => store.queue);
 
   // ===== 应用级 watcher（单例生命周期内只挂载一次） =====
-  // 当歌曲变化时，重新解析 yrc + 重置 liked
-  watch(() => store.currentSong, (songVal) => {
+  // 当歌曲变化时：重置 liked + 重新拉百科（若百科面板已打开则刷新数据）
+  //  - 监听 currentIndex（切歌时立即变化），确保百科面板已打开时自动刷新
+  watch(() => store.currentIndex, () => {
     liked.value = false;
-    const yrcText = (songVal as any)?.yrcText;
-    if (yrcText) {
-      yrcLines.value = parseYrcLines(yrcText);
-    } else {
-      yrcLines.value = [];
+    // 若百科面板已打开，自动拉取新歌曲的百科数据
+    if (showWiki.value) {
+      void preloadWiki();
     }
-  }, { immediate: true });
+  });
+  // neteaseId 就绪后再触发一次（currentIndex 变化时 neteaseId 可能还没设置）
+  watch(() => store.currentSong?.neteaseId, (newId, oldId) => {
+    if (newId !== oldId && showWiki.value) {
+      void preloadWiki();
+    }
+  });
+
+  // 当歌曲变化 OR 当前歌曲的 yrcText 异步就绪时，重新解析 yrc
+  //  - 第一次切歌：song.yrcText 通常还没有（API 异步获取），yrcLines = []
+  //  - 后台 _ensureNeteaseLyrics 完成后写入 yrcText，本 watcher 再次触发，解析 yrc
+  //  - 切到无 yrc 歌曲：yrcLines 立即清空
+  watch(
+    () => [store.currentSong, (store.currentSong as any)?.yrcText] as const,
+    ([songVal, _yrcText]) => {
+      const yrcText = (songVal as any)?.yrcText;
+      if (yrcText) {
+        yrcLines.value = parseYrcLines(yrcText);
+      } else {
+        yrcLines.value = [];
+      }
+    },
+    { immediate: true }
+  );
 
   // 同步 liked 状态（异步获取，加竞态保护）
   watch(() => store.currentSong, async (songVal) => {
@@ -453,7 +554,7 @@ function createApi() {
     // 布局状态
     showSettings,
     showQueue,
-    queueLoading,
+    showWiki,
     topbarVisible,
     qpListRef,
     onMouseMove,
@@ -461,6 +562,12 @@ function createApi() {
     toggleFullscreen,
     toggleQueue,
     scrollQueueToCurrent,
+    // 歌曲百科
+    wikiSummary,
+    wikiLoading,
+    toggleWiki,
+    closeWiki,
+    preloadWiki,
     // PlayMode
     playMode,
     cyclePlayMode,
@@ -472,6 +579,9 @@ function createApi() {
     // 进度
     progressFrac,
     onSeek,
+    // 高潮点
+    chorusMarkFrac,
+    jumpToChorus,
     // 音质
     audioLevels,
     cycleAudioLevel,

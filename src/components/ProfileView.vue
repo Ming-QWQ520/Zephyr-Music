@@ -26,6 +26,15 @@ import {
   neteaseSongToSong,
 } from "@/api/netease";
 import {
+  dailySignin,
+  yunbeiSign,
+  yunbeiAccount,
+  vipSign,
+  vipGrowthpoint,
+  vipTasks,
+  vipGrowthpointGet,
+} from "@/api/netease/signin";
+import {
   useNeteaseUser,
   formatCreateTime,
   genderText,
@@ -88,6 +97,8 @@ onMounted(() => {
       weekRankLoaded = true;
       loadWeekRank();
     }
+    // 加载签到/云贝数据（一次请求获取余额+签到状态）
+    loadSigninInfo();
     lastProfileLoadTime = now;
   }
 });
@@ -239,6 +250,222 @@ function playSongAt(song: Song, list: Song[]) {
 function goBack() {
   store.setView("recommend");
 }
+
+// ===== 签到 / 云贝（弹窗式）=====
+const showSigninModal = ref(false);     // 弹窗是否可见
+const dailySigned = ref(false);        // 每日签到是否已完成
+const dailySignLoading = ref(false);
+const dailySignResult = ref("");       // 签到结果提示
+
+const yunbeiSigned = ref(false);       // 云贝签到是否已完成
+const yunbeiSignLoading = ref(false);
+const yunbeiSignResult = ref("");
+
+const yunbeiBalance = ref<number | null>(null); // 云贝余额
+const yunbeiBalanceLoading = ref(false);
+
+// VIP 乐签打卡
+const vipSigned = ref(false);            // 乐签打卡是否已完成
+const vipSignLoading = ref(false);
+const vipSignResult = ref("");
+
+// VIP 成长值 & 等级
+const vipGrowthValue = ref<number | null>(null); // 成长值
+const vipGrowthLoading = ref(false);
+const vipLevel = ref<number | null>(null);          // VIP 等级
+const vipLevelName = ref<string | null>(null);     // VIP 等级名称，如 "黑胶·叁"
+
+// 领取 VIP 成长值
+const vipGrowthGetLoading = ref(false);
+const vipGrowthGetResult = ref("");
+
+/** 每日签到 */
+async function doDailySignin() {
+  dailySignLoading.value = true;
+  dailySignResult.value = "";
+  try {
+    const r = await dailySignin(0); // type=0 安卓签到（3积分）
+    if (r.code === 200) {
+      dailySigned.value = true;
+      dailySignResult.value = `签到成功！+${r.point || 3} 积分`;
+      loadSigninInfo(); // 签到后刷新余额和状态
+    } else if (r.code === -2) {
+      // 重复签到
+      dailySigned.value = true;
+      dailySignResult.value = "今日已签到";
+    } else {
+      dailySignResult.value = `签到失败 (${r.code || '未知错误'})`;
+    }
+  } catch (e) {
+    dailySignResult.value = "签到失败，请检查网络";
+  } finally {
+    dailySignLoading.value = false;
+  }
+}
+
+/** 云贝签到 */
+async function doYunbeiSign() {
+  yunbeiSignLoading.value = true;
+  yunbeiSignResult.value = "";
+  try {
+    const r = await yunbeiSign();
+    if (r.code === 200) {
+      yunbeiSigned.value = true;
+      yunbeiSignResult.value = "云贝签到成功！";
+      loadSigninInfo(); // 签到后刷新余额和状态
+    } else if (r.code === -2) {
+      // 重复签到
+      yunbeiSigned.value = true;
+      yunbeiSignResult.value = "今日已签到";
+    } else {
+      yunbeiSignResult.value = `签到失败 (${r.code || '未知错误'})`;
+    }
+  } catch (e) {
+    yunbeiSignResult.value = "签到失败，请检查网络";
+  } finally {
+    yunbeiSignLoading.value = false;
+  }
+}
+
+/** 加载云贝账户信息（一次请求同时获取余额 + 签到状态）
+ *  /yunbei/info 返回：
+ *    - userPoint.balance: 云贝总数
+ *    - mobileSign: 安卓端是否已签到
+ *    - pcSign: PC端是否已签到
+ */
+async function loadSigninInfo() {
+  yunbeiBalanceLoading.value = true;
+  try {
+    const r = await yunbeiAccount();
+    if (r.code === 200) {
+      // 云贝余额
+      yunbeiBalance.value = r.userPoint?.balance ?? null;
+      // 每日签到状态：mobileSign=true 表示安卓端已签到
+      dailySigned.value = !!r.mobileSign;
+      // 云贝签到状态：mobileSign 或 pcSign 任一为 true 即表示今日已签到
+      yunbeiSigned.value = !!r.mobileSign || !!r.pcSign;
+    }
+  } catch (e) {
+    yunbeiBalance.value = null;
+  } finally {
+    yunbeiBalanceLoading.value = false;
+  }
+}
+
+/** VIP 乐签打卡 */
+async function doVipSign() {
+  vipSignLoading.value = true;
+  vipSignResult.value = "";
+  try {
+    const r = await vipSign();
+    if (r.code === 200) {
+      vipSigned.value = true;
+      vipSignResult.value = "打卡成功！";
+      loadVipGrowth(); // 打卡后刷新成长值
+    } else if (r.code === -2) {
+      vipSigned.value = true;
+      vipSignResult.value = "今日已打卡";
+    } else {
+      vipSignResult.value = `打卡失败 (${r.code || '未知错误'})`;
+    }
+  } catch (e) {
+    vipSignResult.value = "打卡失败，请检查网络";
+  } finally {
+    vipSignLoading.value = false;
+  }
+}
+
+/** 加载 VIP 成长值（/vip/growthpoint）
+ *  normalizeResponse 会自动解包 data 层，所以实际返回结构为：
+ *    r.userLevel.growthPoint — 当前成长值
+ *    r.userLevel.level       — VIP 等级
+ *    r.userLevel.levelName   — 等级名称，如 "黑胶·叁"
+ */
+async function loadVipGrowth() {
+  vipGrowthLoading.value = true;
+  try {
+    const r = await vipGrowthpoint();
+    if (r.code === 200) {
+      vipGrowthValue.value = r.userLevel?.growthPoint ?? null;
+      vipLevel.value = r.userLevel?.level ?? null;
+      vipLevelName.value = r.userLevel?.levelName ?? null;
+    }
+  } catch (e) {
+    vipGrowthValue.value = null;
+    vipLevel.value = null;
+    vipLevelName.value = null;
+  } finally {
+    vipGrowthLoading.value = false;
+  }
+}
+
+/** 领取 VIP 成长值
+ *  流程：先调用 /vip/tasks 获取 unGetIds，再调用 /vip/growthpoint/get?ids=... 领取
+ */
+async function doVipGrowthGet() {
+  vipGrowthGetLoading.value = true;
+  vipGrowthGetResult.value = "";
+  try {
+    // 1. 获取 VIP 任务列表，提取 unGetIds
+    const tasksRes = await vipTasks();
+    if (tasksRes.code !== 200) {
+      vipGrowthGetResult.value = "获取任务失败";
+      return;
+    }
+    // unGetIds 可能是数组或字符串，需要拼接为逗号分隔的 ids
+    const unGetIds = tasksRes.unGetIds || tasksRes.data?.unGetIds;
+    if (!unGetIds || (Array.isArray(unGetIds) && unGetIds.length === 0)) {
+      vipGrowthGetResult.value = "暂无可领取";
+      return;
+    }
+    // 拼接 ids 字符串
+    const ids = Array.isArray(unGetIds) ? unGetIds.join(",") : String(unGetIds);
+    // 2. 领取成长值
+    const r = await vipGrowthpointGet(ids);
+    if (r.code === 200) {
+      vipGrowthGetResult.value = "领取成功！";
+      loadVipGrowth(); // 领取后刷新成长值
+    } else {
+      vipGrowthGetResult.value = `领取失败 (${r.code || '未知错误'})`;
+    }
+  } catch (e) {
+    vipGrowthGetResult.value = "领取失败，请检查网络";
+  } finally {
+    vipGrowthGetLoading.value = false;
+  }
+}
+
+/** 打开签到弹窗时，自动刷新余额和签到状态 */
+function openSigninModal() {
+  showSigninModal.value = true;
+  loadSigninInfo();
+  loadVipGrowth();
+}
+
+/** 关闭弹窗 */
+function closeSigninModal() {
+  showSigninModal.value = false;
+}
+
+/** 点击遮罩层关闭 */
+function onModalOverlayClick(e: MouseEvent) {
+  if (e.target === e.currentTarget) closeSigninModal();
+}
+
+/** 弹窗内快捷摘要：签到+云贝+VIP状态 */
+const signinSummary = computed(() => {
+  const parts: string[] = [];
+  if (dailySigned.value) parts.push("已签到");
+  if (yunbeiBalance.value !== null) parts.push(`云贝 ${yunbeiBalance.value}`);
+  if (vipGrowthValue.value !== null) parts.push(`成长值 ${vipGrowthValue.value}${vipLevelName.value ? ` (${vipLevelName.value})` : ''}`);
+  return parts.length ? parts.join(" · ") : "";
+});
+
+// 内联 SVG 图标（签到/云贝/VIP）
+const SVG_CHECK = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+const SVG_COIN = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v12"/><path d="M15.5 9a3 3 0 0 0-7 0c0 1.5 1.5 2 3 2.5s3 1 3 2.5a3 3 0 0 1-7 0"/></svg>`;
+const SVG_VIP = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>`;
+const SVG_CLOSE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="M6 6 18 18"/></svg>`;
 </script>
 
 <template>
@@ -286,18 +513,152 @@ function goBack() {
             VIP 到期: {{ neVipInfo.expireText }}
           </p>
 
-          <!-- 资料条：注册时间 / 性别 / 所在地区（横向排列） -->
-          <div v-if="profileItems.length" class="user-meta">
-            <div v-for="item in profileItems" :key="item.label" class="meta-pill">
-              <span class="meta-icon" v-html="ICON_MAP[item.icon]" />
-              <span class="meta-label">{{ item.label }}</span>
-              <span class="meta-value">{{ item.value }}</span>
+          <!-- 资料条：注册时间 / 性别 / 所在地区 + 签到按钮（横向排列） -->
+          <div class="user-meta-row">
+            <div v-if="profileItems.length" class="user-meta">
+              <div v-for="item in profileItems" :key="item.label" class="meta-pill">
+                <span class="meta-icon" v-html="ICON_MAP[item.icon]" />
+                <span class="meta-label">{{ item.label }}</span>
+                <span class="meta-value">{{ item.value }}</span>
+              </div>
             </div>
+            <button class="signin-trigger" :class="{ done: dailySigned && yunbeiSigned && vipSigned }" @click="openSigninModal">
+              <span class="signin-trigger-icon" v-html="SVG_CHECK" />
+              <span v-if="dailySigned && yunbeiSigned && vipSigned">已签到</span>
+              <span v-else>签到</span>
+              <span v-if="signinSummary" class="signin-trigger-summary">{{ signinSummary }}</span>
+            </button>
           </div>
         </div>
       </div>
 
-      <!-- 第二行：听歌统计卡片 -->
+      <!-- 签到弹窗 -->
+      <Teleport to="body">
+        <Transition name="modal">
+          <div v-if="showSigninModal" class="modal-overlay" @click="onModalOverlayClick">
+            <div class="modal-panel">
+              <div class="modal-header">
+                <span class="modal-title">
+                  <span class="modal-title-icon" v-html="SVG_CHECK" />
+                  签到 & 云贝
+                </span>
+                <button class="modal-close" @click="closeSigninModal">
+                  <span v-html="SVG_CLOSE" />
+                </button>
+              </div>
+              <div class="modal-body">
+                <!-- 每日签到 -->
+                <div class="signin-row">
+                  <div class="signin-info">
+                    <span class="signin-label">每日签到</span>
+                    <span class="signin-sublabel">安卓端 +3 积分</span>
+                    <span v-if="dailySignResult" class="signin-result" :class="{ success: dailySigned }">{{ dailySignResult }}</span>
+                  </div>
+                  <button
+                    class="signin-btn"
+                    :class="{ done: dailySigned }"
+                    :disabled="dailySigned || dailySignLoading"
+                    @click="doDailySignin"
+                  >
+                    <span v-if="dailySignLoading" class="spinner-sm" />
+                    <span v-else-if="dailySigned" class="signin-check-icon" v-html="SVG_CHECK" />
+                    <span v-else>签到</span>
+                  </button>
+                </div>
+
+                <!-- 云贝签到 -->
+                <div class="signin-row">
+                  <div class="signin-info">
+                    <span class="signin-label">云贝签到</span>
+                    <span v-if="yunbeiSignResult" class="signin-result" :class="{ success: yunbeiSigned }">{{ yunbeiSignResult }}</span>
+                  </div>
+                  <button
+                    class="signin-btn yunbei"
+                    :class="{ done: yunbeiSigned }"
+                    :disabled="yunbeiSigned || yunbeiSignLoading"
+                    @click="doYunbeiSign"
+                  >
+                    <span v-if="yunbeiSignLoading" class="spinner-sm" />
+                    <span v-else-if="yunbeiSigned" class="signin-check-icon" v-html="SVG_CHECK" />
+                    <span v-else>签到</span>
+                  </button>
+                </div>
+
+                <!-- VIP 乐签打卡 -->
+                <div class="signin-row">
+                  <div class="signin-info">
+                    <span class="vip-icon" v-html="SVG_VIP" />
+                    <span class="signin-label">乐签打卡</span>
+                    <span v-if="vipSignResult" class="signin-result" :class="{ success: vipSigned }">{{ vipSignResult }}</span>
+                  </div>
+                  <button
+                    class="signin-btn vip"
+                    :class="{ done: vipSigned }"
+                    :disabled="vipSigned || vipSignLoading"
+                    @click="doVipSign"
+                  >
+                    <span v-if="vipSignLoading" class="spinner-sm" />
+                    <span v-else-if="vipSigned" class="signin-check-icon" v-html="SVG_CHECK" />
+                    <span v-else>打卡</span>
+                  </button>
+                </div>
+
+                <!-- 分隔线 -->
+                <div class="signin-divider" />
+
+                <!-- 云贝余额 -->
+                <div class="signin-row">
+                  <div class="signin-info">
+                    <span class="coin-icon" v-html="SVG_COIN" />
+                    <span class="signin-label">云贝余额</span>
+                  </div>
+                  <span class="yunbei-balance">
+                    <span v-if="yunbeiBalanceLoading" class="spinner-sm" />
+                    <span v-else-if="yunbeiBalance !== null">{{ yunbeiBalance }}</span>
+                    <span v-else class="text-tertiary">--</span>
+                  </span>
+                </div>
+
+                <!-- VIP 成长值 & 等级 -->
+                <div class="signin-row">
+                  <div class="signin-info">
+                    <span class="vip-icon" v-html="SVG_VIP" />
+                    <span class="signin-label">VIP 成长值</span>
+                    <span v-if="vipLevelName" class="signin-sublabel">{{ vipLevelName }}</span>
+                  </div>
+                  <span class="yunbei-balance">
+                    <span v-if="vipGrowthLoading" class="spinner-sm" />
+                    <template v-else-if="vipGrowthValue !== null">
+                      <span class="vip-growth-num">{{ vipGrowthValue }}</span>
+                      <span v-if="vipLevel !== null" class="vip-level-badge">Lv.{{ vipLevel }}</span>
+                    </template>
+                    <span v-else class="text-tertiary">--</span>
+                  </span>
+                </div>
+
+                <!-- 领取 VIP 成长值 -->
+                <div class="signin-row">
+                  <div class="signin-info">
+                    <span class="vip-icon" v-html="SVG_VIP" />
+                    <span class="signin-label">领取成长值</span>
+                    <span v-if="vipGrowthGetResult" class="signin-result" :class="{ success: vipGrowthGetResult === '领取成功！' }">{{ vipGrowthGetResult }}</span>
+                  </div>
+                  <button
+                    class="signin-btn vip"
+                    :disabled="vipGrowthGetLoading"
+                    @click="doVipGrowthGet"
+                  >
+                    <span v-if="vipGrowthGetLoading" class="spinner-sm" />
+                    <span v-else>领取</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
+
+      <!-- 听歌统计卡片 -->
       <div v-if="neListenTotal || neUserLevel" class="profile-card stats-card">
         <div class="card-title">
           <Icon name="clock" :size="14" />
@@ -487,8 +848,6 @@ function goBack() {
   font-weight: 500;
   margin-left: 2px;
   padding: 1px 6px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-elev-2);
 }
 .card-refresh-btn {
   margin-left: auto;
@@ -567,6 +926,11 @@ function goBack() {
 .user-meta {
   display: flex; flex-wrap: wrap;
   gap: 8px;
+}
+.user-meta-row {
+  display: flex; flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin-top: 8px;
 }
 .meta-pill {
@@ -586,6 +950,154 @@ function goBack() {
 .meta-icon :deep(svg) { width: 13px; height: 13px; display: block; }
 .meta-label { color: var(--text-tertiary); }
 .meta-value { color: var(--text-secondary); font-weight: 500; }
+
+/* ===== 签到触发按钮（用户卡片内） ===== */
+.signin-trigger {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 14px;
+  border-radius: var(--radius-full);
+  font-size: 12px; font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+  white-space: nowrap;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.signin-trigger:hover { opacity: 0.85; }
+.signin-trigger:active { transform: scale(0.95); }
+.signin-trigger.done {
+  background: var(--bg-elev-2);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+.signin-trigger-icon { display: inline-flex; color: inherit; width: 13px; height: 13px; }
+.signin-trigger-icon :deep(svg) { width: 13px; height: 13px; display: block; }
+.signin-trigger.done .signin-trigger-icon { color: var(--accent); }
+.signin-trigger-summary {
+  font-size: 10px; font-weight: 400;
+  opacity: 0.75;
+  margin-left: 2px;
+}
+
+/* ===== 签到弹窗 ===== */
+.modal-overlay {
+  position: fixed; inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(2px);
+}
+.modal-panel {
+  width: 380px; max-width: 90vw;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.35);
+  overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 15px; font-weight: 700;
+  color: var(--text);
+}
+.modal-title-icon { display: inline-flex; color: var(--accent); width: 16px; height: 16px; }
+.modal-title-icon :deep(svg) { width: 16px; height: 16px; display: block; }
+.modal-close {
+  width: 28px; height: 28px;
+  border-radius: var(--radius-sm);
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+.modal-close:hover { color: var(--text); background: var(--bg-hover); }
+.modal-close :deep(svg) { width: 16px; height: 16px; display: block; }
+.modal-body {
+  padding: 16px 18px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+/* ===== 签到行（弹窗内） ===== */
+.signin-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg-elev-2);
+  border-radius: var(--radius-sm);
+  gap: 12px;
+}
+.signin-info {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0; flex: 1;
+}
+.signin-label {
+  font-size: 13px; color: var(--text); font-weight: 500;
+}
+.signin-result {
+  font-size: 11px; color: var(--text-tertiary);
+  margin-left: 4px;
+}
+.signin-result.success { color: var(--accent); }
+.coin-icon { display: inline-flex; color: var(--accent); width: 14px; height: 14px; }
+.coin-icon :deep(svg) { width: 14px; height: 14px; display: block; }
+.vip-icon { display: inline-flex; color: #a855f7; width: 14px; height: 14px; }
+.vip-icon :deep(svg) { width: 14px; height: 14px; display: block; }
+.signin-sublabel { font-size: 10px; color: var(--text-tertiary); margin-left: 4px; }
+.signin-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 4px 0;
+  opacity: 0.5;
+}
+.signin-btn {
+  padding: 5px 16px;
+  border-radius: var(--radius-full);
+  font-size: 12px; font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+  min-width: 56px;
+  text-align: center;
+  display: flex; align-items: center; justify-content: center;
+  gap: 4px;
+}
+.signin-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.signin-btn:not(:disabled):hover { opacity: 0.85; }
+.signin-btn:not(:disabled):active { transform: scale(0.95); }
+.signin-btn.done { background: var(--bg-elev-3); color: var(--accent); }
+.signin-btn.yunbei { background: linear-gradient(135deg, #f59e0b, #d97706); }
+.signin-btn.yunbei.done { background: var(--bg-elev-3); color: #f59e0b; }
+.signin-btn.vip { background: linear-gradient(135deg, #a855f7, #7c3aed); }
+.signin-btn.vip.done { background: var(--bg-elev-3); color: #a855f7; }
+.signin-check-icon { display: inline-flex; }
+.signin-check-icon :deep(svg) { width: 14px; height: 14px; display: block; }
+.yunbei-balance {
+  font-size: 15px; font-weight: 700; color: var(--text);
+  display: flex; align-items: center; gap: 4px;
+}
+.vip-growth-num { color: #a855f7; }
+.vip-level-badge {
+  font-size: 10px; font-weight: 600; color: #a855f7;
+  background: rgba(168, 85, 247, 0.12);
+  border-radius: 6px; padding: 1px 5px; line-height: 1.4;
+}
+
+/* ===== 弹窗过渡动画 ===== */
+.modal-enter-active { transition: opacity 0.2s ease-out; }
+.modal-leave-active { transition: opacity 0.15s ease-in; }
+.modal-enter-from, .modal-leave-to { opacity: 0; }
+.modal-enter-from .modal-panel,
+.modal-leave-to .modal-panel {
+  transform: scale(0.95);
+}
 
 /* ===== 听歌统计卡片 ===== */
 .stats-body {
@@ -771,7 +1283,7 @@ function goBack() {
 <style>
 body.has-wallpaper .profile-view .profile-card {
   background: rgba(33, 31, 38, 0.55);
-  backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(3px) saturate(1.8);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
   border-color: rgba(255, 255, 255, 0.10);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -789,5 +1301,11 @@ body.has-wallpaper .profile-view .meta-pill,
 body.has-wallpaper .profile-view .level-block {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.08);
+}
+body.has-wallpaper .modal-panel {
+  background: rgba(33, 31, 38, 0.92);
+  backdrop-filter: blur(16px) saturate(1.8);
+  border-color: rgba(255, 255, 255, 0.10);
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
 }
 </style>

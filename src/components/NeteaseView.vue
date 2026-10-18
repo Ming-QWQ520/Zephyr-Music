@@ -2,11 +2,12 @@
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { usePlayerStore } from "@/stores/player";
 import {
-  playlistTrackAll, recommendSongs, recommendResource, userRecord,
+  playlistTrackAll, recommendSongs, userRecord, songDetail,
   getCachedUser, getCachedPlaylists,
   neteaseSongToSong, getCookie, _cachedUser,
   likeSong, playlistTracks, getCachedLikeList, addLikeCache, removeLikeCache,
-  playlistDetail, playlistDetailDynamic, playlistSubscribers, commentNew, type NewComment,
+  playlistDetail, playlistDetailDynamic, playlistSubscribers, playlistUpdatePlaycount,
+  commentNew, type NewComment,
   type NeteasePlaylist, type PlaylistSubscriber,
 } from "@/api/netease";
 import { log } from "@/composables/logger";
@@ -14,6 +15,7 @@ import { useToast } from "@/composables/useToast";
 const toast = useToast();
 import type { Song } from "@/types";
 import Icon from "@/components/Icon.vue";
+import SongBadge from "@/components/SongBadge.vue";
 import { formatTime } from "@/composables/utils";
 
 const store = usePlayerStore();
@@ -35,6 +37,17 @@ const playCountMap = ref<Map<string, number>>(new Map());
 const songLikedSet = ref<Set<number>>(new Set());
 /** 是否已启动任何加载（防止 onMounted 的 loadData 与 watch 的 pendingPlaylistId 竞争导致闪烁） */
 const loadInitiated = ref(false);
+const reportedPlaylistIds = new Set<number>();
+
+/** 每个真实歌单每次应用会话只上报一次打开，避免重复切换标签导致刷接口。 */
+function reportPlaylistOpen(id: number) {
+  if (id <= 0 || reportedPlaylistIds.has(id)) return;
+  reportedPlaylistIds.add(id);
+  playlistUpdatePlaycount(id).catch(error => {
+    reportedPlaylistIds.delete(id);
+    log.warn("netease-view", "update playlist playcount failed", { id, error: String(error) });
+  });
+}
 
 /** 加载当前列表歌曲的喜欢状态 */
 async function loadSongLikedStatus() {
@@ -47,6 +60,35 @@ async function loadSongLikedStatus() {
     }
     songLikedSet.value = liked;
   } catch { /* ignore */ }
+}
+
+/** 用 /song/detail 批量补充歌曲标识信息（fee/mark/音质）
+ *  列表 API（如 playlistTrackAll）可能返回 mark=0（默认值，不含脏标等位标记），
+ *  因此 mark=0 的歌曲也需要通过 songDetail 重新获取。 */
+async function enrichSongBadges() {
+  const needBadge = currentPlaylistSongs.value.filter(s => (s.fee === undefined || s.mark === undefined || s.mark === 0) && s.neteaseId);
+  if (needBadge.length === 0) return;
+  try {
+    // songDetail 最多支持 1000 首，分批处理
+    const batchSize = 500;
+    for (let i = 0; i < needBadge.length; i += batchSize) {
+      const batch = needBadge.slice(i, i + batchSize);
+      const detailRes = await songDetail(batch.map(s => s.neteaseId!));
+      for (const ds of (detailRes.songs || [])) {
+        const song = currentPlaylistSongs.value.find(s => s.neteaseId === ds.id);
+        if (song) {
+          if (ds.fee !== undefined) song.fee = ds.fee;
+          if (ds.mark !== undefined) song.mark = ds.mark;
+          if (ds.hr) song.hasHires = true;
+          if (ds.sq) song.hasSq = true;
+          if ((ds as any).privilege?.maxBrLevel) song.maxBrLevel = (ds as any).privilege.maxBrLevel;
+        }
+      }
+    }
+    log.info("netease-view", "song badges enriched", { count: needBadge.length });
+  } catch (e) {
+    log.warn("netease-view", "enrich song badges failed", { error: String(e) });
+  }
 }
 
 /** 切换单首歌曲喜欢状态（列表内按钮） */
@@ -105,6 +147,7 @@ async function selectPlaylist(pl: NeteasePlaylist) {
     const res = await playlistTrackAll(pl.id);
     currentPlaylistSongs.value = (res.songs || []).map(neteaseSongToSong);
     loadSongLikedStatus(); // 后台加载喜欢状态
+    enrichSongBadges(); // 后台补充标识信息
   } catch { currentPlaylistSongs.value = []; }
   loadingSongs.value = false;
   // 后台加载歌单详情（动态、评论、收藏者）
@@ -131,49 +174,8 @@ async function loadDailyRecommend() {
     const res = await recommendSongs();
     currentPlaylistSongs.value = (res.data?.dailySongs || []).map(neteaseSongToSong);
     loadSongLikedStatus();
+    enrichSongBadges();
   } catch { currentPlaylistSongs.value = []; }
-  loadingSongs.value = false;
-}
-
-/** 加载私人漫游（推荐资源） - /recommend/resource 返回推荐歌曲列表 */
-async function loadPersonalRoam() {
-  if (selectedPlaylistId.value === -3 && currentPlaylistSongs.value.length > 0) return;
-  loadInitiated.value = true;
-  isRecordView.value = false;
-  playCountMap.value = new Map();
-  songLikedSet.value = new Set();
-  selectedPlaylistId.value = -3;
-  store.setSourcePlaylistId(-3);
-  selectedPlaylistName.value = "私人漫游";
-  selectedPlaylistCover.value = "";
-  // 清空详情数据（私人漫游没有评论/收藏者）
-  playlistDesc.value = "";
-  playlistDynamic.value = null;
-  playlistComments.value = [];
-  playlistSubs.value = [];
-  commentPageNo.value = 1;
-  commentCursor.value = undefined;
-  commentHasMore.value = false;
-  subsOffset.value = 0;
-  activeDetailTab.value = "songs";
-  loadingSongs.value = true;
-  try {
-    const res = await recommendResource();
-    const recPlaylists = res.recommend || res.data || [];
-    if (recPlaylists.length > 0 && recPlaylists[0].id) {
-      const firstPl = recPlaylists[0];
-      const detail = await playlistTrackAll(firstPl.id, 0, 30);
-      currentPlaylistSongs.value = (detail.songs || []).map(neteaseSongToSong);
-      selectedPlaylistName.value = firstPl.name || "私人漫游";
-    } else {
-      currentPlaylistSongs.value = [];
-    }
-    loadSongLikedStatus();
-    log.info("netease-view", "personal roam loaded", { count: currentPlaylistSongs.value.length });
-  } catch (e) {
-    log.warn("netease-view", "load personal roam failed", { error: String(e) });
-    currentPlaylistSongs.value = [];
-  }
   loadingSongs.value = false;
 }
 
@@ -189,6 +191,7 @@ function playSong(idx: number) {
   // 设置听歌打卡的 sourceid（歌单 ID；每日推荐/播放记录等特殊 ID 不作为 sourceid）
   const sid = selectedPlaylistId.value;
   store.setSourcePlaylistId(sid && sid > 0 ? sid : null);
+  if (sid && sid > 0) reportPlaylistOpen(sid);
   store.playList(currentPlaylistSongs.value, idx);
 }
 
@@ -233,6 +236,7 @@ async function loadRecord(type: 0 | 1 = 1) {
     });
     log.info("netease-view", "loadRecord: songs mapped", { count: currentPlaylistSongs.value.length, playCountEntries: playCountMap.value.size });
     loadSongLikedStatus();
+    enrichSongBadges();
   } catch (e) {
     log.warn("netease-view", "loadRecord error", { error: String(e) });
     currentPlaylistSongs.value = [];
@@ -282,6 +286,7 @@ async function loadPlaylistById(id: number) {
       const trackRes = await playlistTrackAll(id);
       currentPlaylistSongs.value = (trackRes.songs || []).map(neteaseSongToSong);
       loadSongLikedStatus();
+      enrichSongBadges();
       log.info("netease-view", "loadPlaylistById done", { id, name: pl.name, count: currentPlaylistSongs.value.length });
       // 后台加载详情动态、评论、收藏者
       loadPlaylistExtra(id);
@@ -306,6 +311,7 @@ const commentHasMore = ref(false);
 const subsOffset = ref(0);
 const loadingComments = ref(false);
 const loadingSubs = ref(false);
+let commentRequestId = 0;
 /** 评论总数 */
 const commentTotal = ref(0);
 /** 收藏者总数 */
@@ -334,6 +340,7 @@ async function loadPlaylistExtra(id: number) {
 }
 
 async function loadComments(id: number, reset = false) {
+  const requestId = reset ? ++commentRequestId : commentRequestId;
   // 私人漫游(-3)/每日推荐(-1)/听歌排行(-2) 等非真实歌单没有评论
   if (id <= 0) {
     playlistComments.value = [];
@@ -341,9 +348,10 @@ async function loadComments(id: number, reset = false) {
     commentHasMore.value = false;
     commentCursor.value = undefined;
     commentPageNo.value = 1;
+    loadingComments.value = false;
     return;
   }
-  if (loadingComments.value) return;
+  if (!reset && loadingComments.value) return;
   if (reset) {
     commentPageNo.value = 1; playlistComments.value = []; commentTotal.value = 0;
     commentCursor.value = undefined; commentHasMore.value = false;
@@ -351,14 +359,20 @@ async function loadComments(id: number, reset = false) {
   loadingComments.value = true;
   try {
     const res = await commentNew(id, 2, commentSortType.value, commentPageNo.value, 20, commentCursor.value);
+    if (requestId !== commentRequestId || selectedPlaylistId.value !== id) return;
     if (reset) playlistComments.value = res.comments || [];
     else playlistComments.value.push(...(res.comments || []));
     commentTotal.value = res.totalCount || 0;
     commentHasMore.value = !!res.hasMore;
     commentCursor.value = res.cursor;
     if (commentHasMore.value) commentPageNo.value += 1;
-  } catch { /* ignore */ }
-  loadingComments.value = false;
+  } catch (error) {
+    if (requestId === commentRequestId) {
+      log.warn("netease-view", "load playlist comments failed", { id, error: String(error) });
+    }
+  } finally {
+    if (requestId === commentRequestId) loadingComments.value = false;
+  }
 }
 
 /** 切换评论排序方式 */
@@ -407,6 +421,10 @@ function formatCount(n: number): string {
   return String(n);
 }
 
+function imageUrlWithSize(url: string, size: number): string {
+  return `${url}${url.includes("?") ? "&" : "?"}param=${size}x${size}`;
+}
+
 /** 返回上一页 */
 function goBack() {
   store.goBackView();
@@ -415,19 +433,19 @@ function goBack() {
 /** 是否显示返回按钮（榜单等非用户歌单时显示） */
 const showBackBtn = computed(() => {
   const pid = selectedPlaylistId.value;
-  // 每日推荐(-1)、听歌排行(-2)、私人漫游(-3)不显示返回
-  if (pid === -1 || pid === -2 || pid === -3) return false;
+  // 每日推荐(-1)、听歌排行(-2)不显示返回
+  if (pid === -1 || pid === -2) return false;
   // 用户歌单列表中的不显示返回
   if (playlists.value.some(p => p.id === pid)) return false;
   return true;
 });
 
 /** 是否显示详情标签页（歌曲/评论/收藏者）
- *  所有真实歌单（id > 0）和私人漫游(-3)都显示，每日推荐(-1)和听歌排行(-2)不显示 */
+ *  真实歌单（id > 0）显示，每日推荐(-1)和听歌排行(-2)不显示 */
 const showDetailTabs = computed(() => {
   if (isRecordView.value) return false;
   const pid = selectedPlaylistId.value;
-  return pid !== null && (pid > 0 || pid === -3);
+  return pid !== null && pid > 0;
 });
 
 /** 是否显示评论/收藏者标签（仅真实歌单 id > 0 才显示） */
@@ -451,6 +469,20 @@ function onContextMenu(e: MouseEvent, song: Song) {
   e.preventDefault();
   contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, song };
   showPlayNextSub.value = false;
+  // 自适应弹出位置：rAF 后测量实际菜单尺寸并调整，确保不溢出屏幕
+  requestAnimationFrame(() => {
+    const els = document.querySelectorAll(".context-menu");
+    const el = els[els.length - 1] as HTMLElement | null;
+    if (!el) return;
+    const mw = el.offsetWidth, mh = el.offsetHeight;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    let x = e.clientX, y = e.clientY;
+    if (x + mw > vw - 8) x = vw - mw - 8;
+    if (y + mh > vh - 8) y = vh - mh - 8;
+    if (x < 8) x = 8;
+    if (y < 8) y = 8;
+    contextMenu.value = { visible: true, x, y, song };
+  });
   // 查询喜欢状态
   if (song.source === "netease" && song.neteaseId) {
     getCachedLikeList().then(set => { ctxSongLiked.value = set.has(song.neteaseId!); }).catch(() => {});
@@ -590,7 +622,6 @@ watch(() => store.pendingPlaylistId, (id) => {
   if (id !== null) {
     if (id === -1) { loadDailyRecommend(); }
     else if (id === -2) { loadRecord(recordType.value); }
-    else if (id === -3) { loadPersonalRoam(); }
     else {
       // 先从缓存的歌单列表找
       const pl = playlists.value.find(p => p.id === id);
@@ -680,12 +711,14 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
           <div v-if="loadingComments && !playlistComments.length" class="songs-loading">加载评论中...</div>
           <div v-else-if="!playlistComments.length" class="songs-empty"><p>暂无评论</p></div>
           <div v-for="c in playlistComments" :key="c.commentId" class="comment-item">
-            <img v-if="c.user.avatarUrl" :src="c.user.avatarUrl + '?param=50x50'" class="comment-avatar" referrerpolicy="no-referrer" loading="lazy" />
+            <img v-if="c.user.avatarUrl" :src="imageUrlWithSize(c.user.avatarUrl, 50)" class="comment-avatar" referrerpolicy="no-referrer" loading="lazy" />
             <div class="comment-body">
               <div class="comment-header">
                 <span class="comment-user">{{ c.user.nickname }}</span>
                 <span v-if="c.ipLocation" class="comment-loc">{{ c.ipLocation }}</span>
-                <span v-if="c.likedCount > 0" class="comment-likes">👍 {{ c.likedCount }}</span>
+                <span v-if="c.liked || c.likedCount > 0" class="comment-likes" :class="{ liked: c.liked }">
+                  {{ c.liked ? "已赞" : "赞" }}<template v-if="c.likedCount"> {{ formatCount(c.likedCount) }}</template>
+                </span>
               </div>
               <div class="comment-content">{{ c.content }}</div>
             </div>
@@ -721,6 +754,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
               <div class="song-cover" v-if="song.pic"><img :src="song.pic" alt="" referrerpolicy="no-referrer" /></div>
               <div class="song-cover-placeholder" v-else><Icon name="music" :size="10" /></div>
               <span class="song-title-text truncate">{{ song.name }}</span>
+              <SongBadge :song="song" size="sm" />
             </span>
             <span class="col-artist">
               <span class="artist-text truncate">{{ song.artist }}</span>
@@ -830,7 +864,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 
 .ne-songs { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .songs-header { display: flex; align-items: center; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--border); }
-.back-btn { width: 40px; height: 40px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: color 0.2s, background 0.2s; flex-shrink: 0; }
+.back-btn { width: 40px; height: 100%; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; color: var(--text-secondary); transition: color 0.2s, background 0.2s; flex-shrink: 0; }
 .back-btn:hover { color: var(--text); background: var(--bg-hover); }
 .songs-header.no-cover { gap: 0; }
 .songs-header-cover { width: 64px; height: 64px; border-radius: 10px; flex-shrink: 0; background: var(--bg-elev-3); overflow: hidden; display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
@@ -844,7 +878,6 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .detail-tabs { display: flex; gap: 4px; padding: 0 24px; border-bottom: 1px solid var(--border); min-height: 40px; align-items: stretch; flex-shrink: 0; }
 .detail-tab { padding: 10px 16px; font-size: 14px; font-weight: 500; color: var(--text-secondary); border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; margin-bottom: -1px; }
 .detail-tab:hover { color: var(--text); }
-.detail-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 /* 评论 */
 .comments-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 16px; }
 .list-total-header { font-size: 12px; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
@@ -859,6 +892,7 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .comment-user { font-size: 13px; font-weight: 600; color: var(--text); }
 .comment-loc { font-size: 10px; color: var(--text-tertiary); margin-left: auto; }
 .comment-likes { font-size: 11px; color: var(--text-tertiary); }
+.comment-likes.liked { color: var(--accent); font-weight: 600; }
 .comment-content { font-size: 13px; color: var(--text-secondary); line-height: 1.5; word-break: break-word; }
 /* 收藏者 */
 .subs-list { padding: 16px 24px; display: flex; flex-direction: column; gap: 8px; }
@@ -891,10 +925,10 @@ onUnmounted(() => { document.removeEventListener("click", onDocClick); });
 .song-trow.active { color: var(--accent); }
 .song-trow.active .col-idx { color: var(--accent); }
 .col-idx { color: var(--text-tertiary); text-align: center; font-variant-numeric: tabular-nums; }
-.col-title { display: flex; align-items: center; gap: 10px; }
+.col-title { display: flex; align-items: center; gap: 6px; overflow: hidden; }
 .song-cover, .song-cover-placeholder { width: 30px; height: 30px; border-radius: 5px; flex-shrink: 0; overflow: hidden; background: var(--bg-elev-3); display: flex; align-items: center; justify-content: center; color: var(--text-tertiary); }
 .song-cover img { width: 100%; height: 100%; object-fit: cover; }
-.song-title-text { color: var(--text); }
+.song-title-text { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-artist { color: var(--text-secondary); }
 .col-dur { color: var(--text-tertiary); text-align: right; font-variant-numeric: tabular-nums; }
 .col-playcount { color: var(--text-tertiary); text-align: right; font-variant-numeric: tabular-nums; font-size: 12px; }

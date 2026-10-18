@@ -7,7 +7,7 @@ export interface ToastOptions {
   title: string;
   /** 子文本（副标题，可选） */
   subtitle?: string;
-  /** 自动消失时间（毫秒），默认 2000ms，设为 0 则不自动消失 */
+  /** 自动消失时间（毫秒），默认 3000ms，设为 0 则不自动消失 */
   duration?: number;
   /** 提示类型 */
   type?: ToastType;
@@ -22,6 +22,8 @@ export interface ToastItem extends Required<Omit<ToastOptions, "subtitle" | "act
   subtitle?: string;
   actionUrl?: string;
   actionText?: string;
+  /** 创建时间戳（用于进度条动画） */
+  createdAt: number;
 }
 
 const toasts = ref<ToastItem[]>([]);
@@ -30,7 +32,8 @@ let nextId = 0;
 /**
  * Toast 提示系统（可复用接口）
  *
- * 显示在右下角，从右侧平滑弹出，自动消失。
+ * 显示在右下角，毛玻璃质感卡片，从右侧平滑弹出，自动消失。
+ * 带进度条显示剩余时间，支持手动关闭和点击跳转。
  *
  * 用法：
  *   const { show, success } = useToast();
@@ -50,10 +53,11 @@ export function useToast() {
       id,
       title: options.title,
       subtitle: options.subtitle,
-      duration: options.duration ?? 2000,
+      duration: options.duration ?? 3000,
       type: options.type ?? "success",
       actionUrl: options.actionUrl,
       actionText: options.actionText,
+      createdAt: Date.now(),
     };
     toasts.value.push(item);
     if (item.duration > 0) {
@@ -67,13 +71,13 @@ export function useToast() {
     show({ title, subtitle, duration, type: "success" });
 
   const error = (title: string, subtitle?: string, duration?: number) =>
-    show({ title, subtitle, duration, type: "error" });
+    show({ title, subtitle, duration: duration ?? 5000, type: "error" });
 
   const info = (title: string, subtitle?: string, duration?: number) =>
     show({ title, subtitle, duration, type: "info" });
 
   const warning = (title: string, subtitle?: string, duration?: number) =>
-    show({ title, subtitle, duration, type: "warning" });
+    show({ title, subtitle, duration: duration ?? 4000, type: "warning" });
 
   return {
     toasts,

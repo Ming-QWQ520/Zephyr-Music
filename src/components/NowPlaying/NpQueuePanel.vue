@@ -5,7 +5,6 @@ import { ref } from "vue";
  *
  * - qp-head / qp-list / qp-item
  * - 复位键（qp-locate-fab）
- * - 转圈占位（queueLoading 期间）
  * - Transition 进入/退出动画
  * - 滚动到当前播放：scrollQueueToCurrent
  *
@@ -21,18 +20,13 @@ import { useNowPlaying } from "./useNowPlaying";
 const {
   store,
   showQueue,
-  queueLoading,
-  qpListRef,
   queueList,
   song,
   scrollQueueToCurrent,
 } = useNowPlaying();
 
 function playQueueItem(idx: number) {
-  store.currentIndex = idx;
-  store.setPlaying(true);
-  const s = store.queue[idx];
-  if (s) store.loadLyrics(s);
+  store.playAt(idx);
 }
 
 // ===== 拖动排序 =====
@@ -73,10 +67,7 @@ function onDragEnd() {
           <Icon name="close" :size="18" />
         </button>
       </header>
-      <div v-if="queueLoading" class="qp-loading">
-        <div class="spinner" />
-      </div>
-      <div v-else ref="qpListRef" class="qp-list nice-scroll">
+      <div ref="qpListRef" class="qp-list nice-scroll">
         <button
           v-for="(s, idx) in queueList"
           :key="s.id"
@@ -101,7 +92,7 @@ function onDragEnd() {
         </button>
       </div>
       <!-- 复位键（浮动在右下角） -->
-      <button v-if="store.currentIndex >= 0 && !queueLoading" class="qp-locate-fab" title="定位当前播放" @click.stop="scrollQueueToCurrent(true)">
+      <button v-if="store.currentIndex >= 0" class="qp-locate-fab" title="定位当前播放" @click.stop="scrollQueueToCurrent(true)">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>
       </button>
     </aside>
@@ -119,15 +110,14 @@ function onDragEnd() {
   max-height: 70vh;
   height: 70vh;
   z-index: 30;
-  background: rgba(10, 10, 12, 0.88);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(3px) saturate(1);
+  -webkit-backdrop-filter: blur(3px) saturate(1);
   border: 1px solid var(--border);
   border-radius: 12px;
   display: flex;
   flex-direction: column;
   padding: 12px;
-  box-shadow: -8px 0 40px rgba(0, 0, 0, 0.5);
 }
 /* 复位键（浮动在播放队列右下角） */
 .qp-locate-fab {
@@ -135,18 +125,14 @@ function onDragEnd() {
   right: 12px; bottom: 12px;
   width: 36px; height: 36px;
   border-radius: 50%;
-  background: var(--accent);
   color: #fff;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
   z-index: 10;
   transition: transform 0.15s var(--ease-out), opacity 0.15s;
   cursor: pointer;
 }
 .qp-locate-fab:hover { transform: scale(1.1); }
 .qp-locate-fab:active { transform: scale(0.95); }
-.qp-loading { flex: 1; display: flex; align-items: center; justify-content: center; }
-.qp-loading .spinner { width: 28px; height: 28px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .queue-slide-enter-active,
 .queue-slide-leave-active {
   transition: transform 0.32s var(--ease-out), opacity 0.32s var(--ease-out);

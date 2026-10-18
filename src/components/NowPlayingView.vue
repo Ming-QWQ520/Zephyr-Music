@@ -34,11 +34,13 @@ const {
   settings,
   showSettings,
   showQueue,
+  showWiki,
   coverUrl,
   onMouseMove,
   close,
   lyricSelectMode,
   exitLyricSelectMode,
+  closeWiki,
 } = useNowPlaying();
 
 // ----- Keyboard shortcuts -----
@@ -46,6 +48,7 @@ function onKey(ev: KeyboardEvent) {
   if (ev.key === "Escape") {
     // 优先退出歌词选择模式
     if (lyricSelectMode.value) { exitLyricSelectMode(); return; }
+    if (showWiki.value) { closeWiki(); return; }
     if (showSettings.value) showSettings.value = false;
     else if (showQueue.value) showQueue.value = false;
     else close();
@@ -136,13 +139,13 @@ onUnmounted(() => {
   justify-items: center;
 }
 .mode-cover .np-main :deep(.right-pane) { display: none; }
-.mode-cover .np-main :deep(.left-pane) { align-items: center; }
+.mode-cover .np-main :deep(.flip-front) { align-items: center; }
 
 /* mode-lyrics: only show lyrics, hide cover + controls */
 .mode-lyrics .np-main {
   grid-template-columns: 1fr;
 }
-.mode-lyrics .np-main :deep(.left-pane) { display: none; }
+.mode-lyrics .np-main :deep(.left-pane-flip) { display: none; }
 .mode-lyrics .np-main :deep(.right-pane) { display: flex; }
 
 @media (max-width: 900px) {
@@ -154,12 +157,12 @@ onUnmounted(() => {
   /* On narrow screens, force cover mode (hide lyrics) unless the user
      explicitly chose lyrics-only mode. */
   .mode-both .np-main :deep(.right-pane) { display: none; }
-  .mode-both .np-main :deep(.left-pane) { align-items: center; }
+  .mode-both .np-main :deep(.flip-front) { align-items: center; }
   .mode-lyrics .np-main { grid-template-columns: 1fr; }
   .mode-lyrics .np-main :deep(.right-pane) { display: flex; }
-  .mode-lyrics .np-main :deep(.left-pane) { display: none; }
+  .mode-lyrics .np-main :deep(.left-pane-flip) { display: none; }
   .mode-cover .np-main :deep(.right-pane) { display: none; }
-  .np-main :deep(.left-pane) { align-items: center; }
+  .np-main :deep(.flip-front) { align-items: center; }
   .np-main :deep(.cover-wrap) { width: min(260px, 60vw); }
   .np-main :deep(.controls-block) { width: 100%; max-width: 480px; }
   .np-main :deep(.vol-cluster) { margin-left: 0; }

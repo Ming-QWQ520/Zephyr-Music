@@ -110,12 +110,18 @@ async function loadVipAndListenData() {
         // 黑胶 VIP(isSign=true 或 vipCode=100) 使用官方固定图标 URL 兜底。
         const DEFAULT_VIP_ICON = "https://p6.music.126.net/obj/wonDlsKUwrLClGjCm8Kx/32582188099/3419/2b65/d241/bd664461c263a2dfdbf631bb9848ee3e.png";
         const DEFAULT_VIP_DYNAMIC = "https://p6.music.126.net/obj/wonDlsKUwrLClGjCm8Kx/32141390012/8f22/7796/8597/3c4e43ad7036268bd80ec4a4d7623d61.webp";
+        // 按等级覆盖 VIP 图标（API 返回的图标可能不准确，特定等级使用官方图标）
+        const VIP_LEVEL_ICONS: Record<number, string> = {
+          4: "http://p6.music.126.net/obj/wovDmcKXw6PCn2_CmsOk/32121299249/dccd/0158/50d1/f1341b49ec823d35d5bcc23bdeca5d4e.png",
+        };
         const isHeijiaoVip = isVip && (d.associator?.isSign === true || d.associator?.vipCode === 100 || (d.associator?.vipLevel ?? 0) > 0);
         let dynamicIconUrl = d.associator?.dynamicIconUrl || "";
         let iconUrl = d.associator?.iconUrl || "";
         // API 返回 null 时用默认黑胶 VIP 图标
         if (isHeijiaoVip && !dynamicIconUrl) dynamicIconUrl = DEFAULT_VIP_DYNAMIC;
         if (isHeijiaoVip && !iconUrl) iconUrl = DEFAULT_VIP_ICON;
+        // 特定等级使用专属图标覆盖
+        if (VIP_LEVEL_ICONS[level]) iconUrl = VIP_LEVEL_ICONS[level];
         neVipInfo.value = { isVip, redVipLevel: level, expireText, dynamicIconUrl, iconUrl };
         log.info("app", "VIP info loaded", { isVip, level, expireText, hasDynamic: !!dynamicIconUrl, hasIcon: !!iconUrl, usedDefault: isHeijiaoVip && (!d.associator?.iconUrl || !d.associator?.dynamicIconUrl) });
       }
